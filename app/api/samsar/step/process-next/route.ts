@@ -1,0 +1,16 @@
+import { NextResponse } from "next/server";
+
+import { jsonError, normalizeString, readJson } from "@/lib/http";
+import { processNextSamsarStep } from "@/lib/samsar";
+
+export async function POST(request: Request) {
+  try {
+    const payload = await readJson<Record<string, unknown>>(request);
+    const requestId = normalizeString(payload.request_id || payload.requestId || payload.session_id || payload.sessionId);
+    const environment = payload.environment === "production" ? "production" : "staging";
+    const response = await processNextSamsarStep(request, requestId, environment);
+    return NextResponse.json(response);
+  } catch (error) {
+    return jsonError(error);
+  }
+}
