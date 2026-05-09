@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { requireSessionUser } from "@/lib/auth";
-import { createId, mutateDb, nowIso, readDb, type FlashReelsEnvironment, type FlashReelsMode } from "@/lib/db";
+import { createId, mutateDb, nowIso, readDb, type FlashReelsMode } from "@/lib/db";
 import { apiError, jsonError, normalizeString, readJson } from "@/lib/http";
 
 export async function GET(request: Request) {
@@ -24,7 +24,6 @@ export async function POST(request: Request) {
     const sourceUrl = normalizeString(payload.sourceUrl || payload.source_url || payload.videoUrl || payload.video_url);
     const prompt = normalizeString(payload.prompt);
     const mode = payload.mode === "image_list_to_video" ? "image_list_to_video" : "text_to_video";
-    const environment: FlashReelsEnvironment = payload.environment === "production" ? "production" : "staging";
     if (!sourceUrl) {
       throw apiError("sourceUrl is required.");
     }
@@ -55,7 +54,6 @@ export async function POST(request: Request) {
         title: normalizeString(payload.title) || "Untitled render",
         mode: mode as FlashReelsMode,
         prompt,
-        environment,
         sourceUrl,
         samsarRequestId: normalizeString(payload.samsarRequestId || payload.samsar_request_id),
         samsarSessionId: normalizeString(payload.samsarSessionId || payload.samsar_session_id),

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { getSetupStatus, saveRuntimeKeys, setActiveEnvironment } from "@/lib/secure-config";
+import { getSetupStatus, saveRuntimeKeys } from "@/lib/secure-config";
 import { jsonError, readJson } from "@/lib/http";
 
 export async function GET() {
@@ -13,9 +13,6 @@ export async function POST(request: Request) {
     if (payload.samsarApiKey || payload.runwayApiKey) {
       const status = await saveRuntimeKeys(payload);
       return NextResponse.json(status);
-    }
-    if (payload.environment) {
-      await setActiveEnvironment(payload.environment);
     }
     return NextResponse.json(await getSetupStatus());
   } catch (error) {

@@ -1,8 +1,7 @@
 import crypto from "node:crypto";
 import os from "node:os";
 
-import { apiError, normalizeString, trimTrailingSlash } from "@/lib/http";
-import type { FlashReelsEnvironment } from "@/lib/db";
+import { apiError, trimTrailingSlash } from "@/lib/http";
 import { getPersistenceStatus, readPersistentJson, writePersistentJson } from "@/lib/persistent-store";
 
 const STORE_KEY = "flashreels:secrets:v1";
@@ -18,19 +17,14 @@ interface EncryptedSecret {
 
 interface SecretStore {
   version: 1;
-  activeEnvironment: FlashReelsEnvironment;
   updatedAt: string;
-  keys: Record<FlashReelsEnvironment, Partial<Record<SecretName, EncryptedSecret>>>;
+  keys: Partial<Record<SecretName, EncryptedSecret>>;
 }
 
 const EMPTY_STORE: SecretStore = {
   version: 1,
-  activeEnvironment: "staging",
   updatedAt: new Date(0).toISOString(),
-  keys: {
-    staging: {},
-    production: {},
-  },
+  keys: {},
 };
 
 function getEncryptionKey() {
@@ -73,20 +67,21 @@ function decrypt(secret?: EncryptedSecret) {
   }
 }
 
-function normalizeEnvironment(value: unknown): FlashReelsEnvironment {
-  return normalizeString(value) === "production" ? "production" : "staging";
+function normalizeStoredKeys(parsed: Partial<SecretStore> & { keys?: Record<string, unknown> }) {
+  const legacyKeys = parsed.keys || {};
+  const directKeys = legacyKeys as Partial<Record<SecretName, EncryptedSecret>>;
+  return {
+    ...(directKeys.samsarApiKey ? { samsarApiKey: directKeys.samsarApiKey } : {}),
+    ...(directKeys.runwayApiKey ? { runwayApiKey: directKeys.runwayApiKey } : {}),
+  };
 }
 
 async function readStore(): Promise<SecretStore> {
-  const parsed = await readPersistentJson<Partial<SecretStore>>(STORE_KEY, STORE_FILE, EMPTY_STORE);
+  const parsed = await readPersistentJson<Partial<SecretStore> & { keys?: Record<string, unknown> }>(STORE_KEY, STORE_FILE, EMPTY_STORE);
   return {
     version: 1,
-    activeEnvironment: normalizeEnvironment(parsed.activeEnvironment || process.env.FLASHREELS_ACTIVE_ENV),
     updatedAt: parsed.updatedAt || new Date(0).toISOString(),
-    keys: {
-      staging: parsed.keys?.staging || {},
-      production: parsed.keys?.production || {},
-    },
+    keys: normalizeStoredKeys(parsed),
   };
 }
 
@@ -104,69 +99,40 @@ function envValue(names: string[]) {
   return { value: "", source: "" };
 }
 
-function envNames(environment: FlashReelsEnvironment, secret: SecretName) {
+function envNames(secret: SecretName) {
   if (secret === "samsarApiKey") {
-    return environment === "production"
-      ? ["FLASHREELS_PRODUCTION_SAMSAR_API_KEY", "SAMSAR_PRODUCTION_API_KEY", "SAMSAR_API_KEY"]
-      : ["FLASHREELS_STAGING_SAMSAR_API_KEY", "SAMSAR_STAGING_API_KEY", "SAMSAR_API_KEY"];
+    return ["FLASHREELS_SAMSAR_API_KEY", "SAMSAR_API_KEY"];
   }
-
-  return environment === "production"
-    ? ["FLASHREELS_PRODUCTION_RUNWAYML_API_KEY", "RUNWAYML_PRODUCTION_API_SECRET", "RUNWAYML_API_SECRET", "RUNWAY_API_KEY"]
-    : ["FLASHREELS_STAGING_RUNWAYML_API_KEY", "RUNWAYML_STAGING_API_SECRET", "RUNWAYML_API_SECRET", "RUNWAY_API_KEY"];
+  return ["FLASHREELS_RUNWAYML_API_KEY", "RUNWAYML_API_SECRET", "RUNWAY_API_KEY"];
 }
 
 export async function saveRuntimeKeys(payload: Record<string, unknown>) {
-  const environment = normalizeEnvironment(payload.environment);
-  const samsarApiKey = normalizeString(payload.samsarApiKey);
-  const runwayApiKey = normalizeString(payload.runwayApiKey);
-  const setActive = payload.setActive !== false;
+  const samsarApiKey = typeof payload.samsarApiKey === "string" ? payload.samsarApiKey.trim() : "";
+  const runwayApiKey = typeof payload.runwayApiKey === "string" ? payload.runwayApiKey.trim() : "";
 
   if (!samsarApiKey && !runwayApiKey) {
     throw apiError("Provide at least one API key to save.");
   }
 
   const store = await readStore();
-  store.keys[environment] = {
-    ...store.keys[environment],
+  store.keys = {
+    ...store.keys,
     ...(samsarApiKey ? { samsarApiKey: encrypt(samsarApiKey) } : {}),
     ...(runwayApiKey ? { runwayApiKey: encrypt(runwayApiKey) } : {}),
   };
-  if (setActive) {
-    store.activeEnvironment = environment;
-  }
   store.updatedAt = new Date().toISOString();
   await writeStore(store);
   return getSetupStatus();
 }
 
-export async function setActiveEnvironment(environmentValue: unknown) {
-  const environment = normalizeEnvironment(environmentValue);
+export async function getRuntimeKeys() {
   const store = await readStore();
-  store.activeEnvironment = environment;
-  store.updatedAt = new Date().toISOString();
-  await writeStore(store);
-  return environment;
-}
-
-export async function getActiveEnvironment() {
-  const fromEnv = normalizeString(process.env.FLASHREELS_ACTIVE_ENV);
-  if (fromEnv === "staging" || fromEnv === "production") {
-    return fromEnv;
-  }
-  return (await readStore()).activeEnvironment;
-}
-
-export async function getRuntimeKeys(environmentValue?: unknown) {
-  const environment = environmentValue ? normalizeEnvironment(environmentValue) : await getActiveEnvironment();
-  const store = await readStore();
-  const samsarEnv = envValue(envNames(environment, "samsarApiKey"));
-  const runwayEnv = envValue(envNames(environment, "runwayApiKey"));
-  const samsarApiKey = samsarEnv.value || decrypt(store.keys[environment].samsarApiKey);
-  const runwayApiKey = runwayEnv.value || decrypt(store.keys[environment].runwayApiKey);
+  const samsarEnv = envValue(envNames("samsarApiKey"));
+  const runwayEnv = envValue(envNames("runwayApiKey"));
+  const samsarApiKey = samsarEnv.value || decrypt(store.keys.samsarApiKey);
+  const runwayApiKey = runwayEnv.value || decrypt(store.keys.runwayApiKey);
 
   return {
-    environment,
     samsarApiKey,
     runwayApiKey,
     sources: {
@@ -176,64 +142,30 @@ export async function getRuntimeKeys(environmentValue?: unknown) {
   };
 }
 
-export async function requireRuntimeKeys(environmentValue?: unknown) {
-  const keys = await getRuntimeKeys(environmentValue);
+export async function requireRuntimeKeys() {
+  const keys = await getRuntimeKeys();
   if (!keys.samsarApiKey) {
-    throw apiError(`Samsar API key is not configured for ${keys.environment}.`, 412);
+    throw apiError("Samsar API key is not configured.", 412);
   }
   if (!keys.runwayApiKey) {
-    throw apiError(`RunwayML API key is not configured for ${keys.environment}.`, 412);
+    throw apiError("RunwayML API key is not configured.", 412);
   }
   return keys;
 }
 
 export async function getSetupStatus() {
-  const activeEnvironment = await getActiveEnvironment();
-  const environments: Record<FlashReelsEnvironment, {
-    samsarConfigured: boolean;
-    runwayConfigured: boolean;
-    samsarSource: string;
-    runwaySource: string;
-    envVars: {
-      samsar: string[];
-      runway: string[];
-    };
-  }> = {
-    staging: {
-      samsarConfigured: false,
-      runwayConfigured: false,
-      samsarSource: "",
-      runwaySource: "",
-      envVars: {
-        samsar: envNames("staging", "samsarApiKey"),
-        runway: envNames("staging", "runwayApiKey"),
-      },
-    },
-    production: {
-      samsarConfigured: false,
-      runwayConfigured: false,
-      samsarSource: "",
-      runwaySource: "",
-      envVars: {
-        samsar: envNames("production", "samsarApiKey"),
-        runway: envNames("production", "runwayApiKey"),
-      },
-    },
-  };
-
-  for (const environment of ["staging", "production"] as const) {
-    const keys = await getRuntimeKeys(environment);
-    environments[environment].samsarConfigured = Boolean(keys.samsarApiKey);
-    environments[environment].runwayConfigured = Boolean(keys.runwayApiKey);
-    environments[environment].samsarSource = keys.sources.samsarApiKey;
-    environments[environment].runwaySource = keys.sources.runwayApiKey;
-  }
-
+  const keys = await getRuntimeKeys();
   return {
-    activeEnvironment,
-    environments,
+    samsarConfigured: Boolean(keys.samsarApiKey),
+    runwayConfigured: Boolean(keys.runwayApiKey),
+    samsarSource: keys.sources.samsarApiKey,
+    runwaySource: keys.sources.runwayApiKey,
+    envVars: {
+      samsar: envNames("samsarApiKey").slice(0, 1),
+      runway: envNames("runwayApiKey").slice(0, 1),
+    },
     persistence: getPersistenceStatus(),
-    ready: environments[activeEnvironment].samsarConfigured && environments[activeEnvironment].runwayConfigured,
+    ready: Boolean(keys.samsarApiKey && keys.runwayApiKey),
   };
 }
 

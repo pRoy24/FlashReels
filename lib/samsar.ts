@@ -7,7 +7,7 @@ import SamsarClient, {
 } from "samsar-js";
 
 import { requireSessionUser } from "@/lib/auth";
-import type { FlashReelsEnvironment, FlashReelsMode } from "@/lib/db";
+import type { FlashReelsMode } from "@/lib/db";
 import { apiError, getRequestOrigin, normalizeString, trimTrailingSlash } from "@/lib/http";
 import { getRuntimeKeys, getSamsarSdkBaseUrl, requireRuntimeKeys } from "@/lib/secure-config";
 
@@ -20,7 +20,6 @@ interface StartPayload {
   aspect_ratio?: "16:9" | "9:16" | "1:1";
   duration?: number;
   enableSubtitles?: boolean;
-  environment?: FlashReelsEnvironment;
   metadata?: Record<string, unknown>;
 }
 
@@ -72,16 +71,16 @@ function buildExternalUser(user: { id: string; email?: string; displayName?: str
   };
 }
 
-function buildCustomAdapters(request: Request, environment: FlashReelsEnvironment) {
+function buildCustomAdapters(request: Request) {
   const baseUrl = trimTrailingSlash(getRequestOrigin(request));
   return {
     base_url: baseUrl,
-    text_to_image: `/api/runway/${environment}/text-to-image`,
-    image_to_video: `/api/runway/${environment}/image-to-video`,
+    text_to_image: "/api/runway/text-to-image",
+    image_to_video: "/api/runway/image-to-video",
   };
 }
 
-function buildCommonInput(request: Request, payload: StartPayload, environment: FlashReelsEnvironment) {
+function buildCommonInput(request: Request, payload: StartPayload) {
   const prompt = normalizeString(payload.prompt);
   if (!prompt) {
     throw apiError("Prompt is required.");
@@ -94,17 +93,16 @@ function buildCommonInput(request: Request, payload: StartPayload, environment: 
     enable_subtitles: payload.enableSubtitles !== false,
     image_model: "NANOBANANA2",
     video_model: "RUNWAYML",
-    custom_adapters: buildCustomAdapters(request, environment),
+    custom_adapters: buildCustomAdapters(request),
   };
 }
 
 export async function startSamsarStepVideo(request: Request, payload: StartPayload) {
   const user = await requireSessionUser(request);
-  const environment = payload.environment === "production" ? "production" : "staging";
-  const keys = await requireRuntimeKeys(environment);
+  const keys = await requireRuntimeKeys();
   const client = getClient(keys.samsarApiKey);
   const mode = normalizeMode(payload.mode);
-  const commonInput = buildCommonInput(request, payload, environment);
+  const commonInput = buildCommonInput(request, payload);
 
   if (mode === "image_list_to_video") {
     const imageUrls = normalizeImageUrls(payload);
@@ -133,12 +131,11 @@ export async function startSamsarStepVideo(request: Request, payload: StartPaylo
 export async function getSamsarStepStatusDetailed(
   request: Request,
   requestId: string,
-  environment: FlashReelsEnvironment,
 ): Promise<V2StepVideoDetailedStatusResponse> {
   const user = await requireSessionUser(request);
-  const keys = await getRuntimeKeys(environment);
+  const keys = await getRuntimeKeys();
   if (!keys.samsarApiKey) {
-    throw apiError(`Samsar API key is not configured for ${environment}.`, 412);
+    throw apiError("Samsar API key is not configured.", 412);
   }
   const client = getClient(keys.samsarApiKey);
   const response = await client.getV2StepVideoStatusDetailed(requestId, {
@@ -152,12 +149,11 @@ export const getSamsarStepStatus = getSamsarStepStatusDetailed;
 export async function processNextSamsarStep(
   request: Request,
   requestId: string,
-  environment: FlashReelsEnvironment,
 ): Promise<V2StepVideoStatusResponse> {
   const user = await requireSessionUser(request);
-  const keys = await getRuntimeKeys(environment);
+  const keys = await getRuntimeKeys();
   if (!keys.samsarApiKey) {
-    throw apiError(`Samsar API key is not configured for ${environment}.`, 412);
+    throw apiError("Samsar API key is not configured.", 412);
   }
   const client = getClient(keys.samsarApiKey);
   const response = await client.processNextV2StepVideo(requestId, {

@@ -4,7 +4,6 @@ import {
   getRunwayVersion,
   requireRuntimeKeys,
 } from "@/lib/secure-config";
-import type { FlashReelsEnvironment } from "@/lib/db";
 
 type InputPayload = Record<string, unknown>;
 
@@ -138,12 +137,8 @@ function buildPromptImage(input: InputPayload) {
   return startImage || undefined;
 }
 
-async function runwayFetch(
-  environment: FlashReelsEnvironment,
-  pathname: string,
-  init: RequestInit = {},
-) {
-  const keys = await requireRuntimeKeys(environment);
+async function runwayFetch(pathname: string, init: RequestInit = {}) {
+  const keys = await requireRuntimeKeys();
   const response = await fetch(`${getRunwayBaseUrl()}${pathname}`, {
     ...init,
     headers: {
@@ -206,12 +201,10 @@ function buildQueueUrls(request: Request, endpointPath: string, requestId: strin
 }
 
 export async function submitRunwayTextToImage({
-  environment,
   request,
   endpointPath,
   input,
 }: {
-  environment: FlashReelsEnvironment;
   request: Request;
   endpointPath: string;
   input: InputPayload;
@@ -229,7 +222,7 @@ export async function submitRunwayTextToImage({
     referenceImages: referenceImages.length > 0 ? referenceImages : undefined,
   });
 
-  const task = await runwayFetch(environment, "/v1/text_to_image", {
+  const task = await runwayFetch("/v1/text_to_image", {
     method: "POST",
     body: JSON.stringify(body),
   });
@@ -249,12 +242,10 @@ export async function submitRunwayTextToImage({
 }
 
 export async function submitRunwayImageToVideo({
-  environment,
   request,
   endpointPath,
   input,
 }: {
-  environment: FlashReelsEnvironment;
   request: Request;
   endpointPath: string;
   input: InputPayload;
@@ -272,7 +263,7 @@ export async function submitRunwayImageToVideo({
     promptImage: buildPromptImage(input),
   });
 
-  const task = await runwayFetch(environment, "/v1/image_to_video", {
+  const task = await runwayFetch("/v1/image_to_video", {
     method: "POST",
     body: JSON.stringify(body),
   });
@@ -291,12 +282,12 @@ export async function submitRunwayImageToVideo({
   };
 }
 
-export async function getRunwayTask(environment: FlashReelsEnvironment, requestId: string) {
+export async function getRunwayTask(requestId: string) {
   const normalizedRequestId = normalizeString(requestId);
   if (!normalizedRequestId) {
     throw apiError("requestId is required.");
   }
-  const task = await runwayFetch(environment, `/v1/tasks/${encodeURIComponent(normalizedRequestId)}`, {
+  const task = await runwayFetch(`/v1/tasks/${encodeURIComponent(normalizedRequestId)}`, {
     method: "GET",
   });
   return {
@@ -328,8 +319,4 @@ export function buildRunwayResult(task: RunwayTask, kind: "image" | "video") {
           videos: urls.map((url) => ({ url })),
         }),
   };
-}
-
-export function normalizeEnvironmentParam(value: unknown): FlashReelsEnvironment {
-  return normalizeString(value) === "production" ? "production" : "staging";
 }

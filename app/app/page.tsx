@@ -21,7 +21,6 @@ import {
   Wand2,
 } from "lucide-react";
 
-type EnvironmentName = "staging" | "production";
 type Mode = "text_to_video" | "image_list_to_video";
 type ApiRecord = Record<string, unknown>;
 
@@ -32,8 +31,11 @@ interface User {
 }
 
 interface SetupStatus {
-  activeEnvironment: EnvironmentName;
   ready: boolean;
+  samsarConfigured: boolean;
+  runwayConfigured: boolean;
+  samsarSource: string;
+  runwaySource: string;
   persistence?: {
     provider: string;
     persistent: boolean;
@@ -42,16 +44,6 @@ interface SetupStatus {
       token?: string;
     };
   };
-  environments: Record<EnvironmentName, {
-    samsarConfigured: boolean;
-    runwayConfigured: boolean;
-    samsarSource: string;
-    runwaySource: string;
-    envVars: {
-      samsar: string[];
-      runway: string[];
-    };
-  }>;
 }
 
 interface LibraryVideo {
@@ -59,7 +51,6 @@ interface LibraryVideo {
   title: string;
   mode: Mode;
   prompt: string;
-  environment: EnvironmentName;
   sourceUrl: string;
   status: string;
   createdAt: string;
@@ -95,8 +86,8 @@ const STAGE_LABELS: Record<string, string> = {
   video_generation: "Final render",
 };
 
-function buildDetailedStatusUrl(requestId: string, environment: EnvironmentName) {
-  return `/api/samsar/step/status-detailed?request_id=${encodeURIComponent(requestId)}&environment=${environment}`;
+function buildDetailedStatusUrl(requestId: string) {
+  return `/api/samsar/step/status-detailed?request_id=${encodeURIComponent(requestId)}`;
 }
 
 interface StagePreviewResource {
@@ -419,9 +410,6 @@ function SetupWizard({
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const environment = setup?.activeEnvironment || "staging";
-  const envStatus = setup?.environments[environment];
-
   async function submit() {
     setSaving(true);
     setError("");
@@ -429,10 +417,8 @@ function SetupWizard({
       const nextSetup = await readApi<SetupStatus>("/api/setup", {
         method: "POST",
         body: JSON.stringify({
-          environment,
           samsarApiKey,
           runwayApiKey,
-          setActive: true,
         }),
       });
       setSamsarApiKey("");
@@ -457,8 +443,8 @@ function SetupWizard({
         </div>
 
         <div className="setupStatusGrid">
-          <StatusPill ready={Boolean(envStatus?.samsarConfigured)} label="Samsar API key" source={envStatus?.samsarSource} />
-          <StatusPill ready={Boolean(envStatus?.runwayConfigured)} label="RunwayML API key" source={envStatus?.runwaySource} />
+          <StatusPill ready={Boolean(setup?.runwayConfigured)} label="RunwayML API key" source={setup?.runwaySource} />
+          <StatusPill ready={Boolean(setup?.samsarConfigured)} label="Samsar API key" source={setup?.samsarSource} />
           <StatusPill
             ready={Boolean(setup?.persistence?.persistent)}
             label={setup?.persistence?.persistent ? "Vercel Redis" : "Local fallback"}
@@ -467,21 +453,21 @@ function SetupWizard({
         </div>
 
         <label>
-          <span>Samsar.one API key</span>
-          <input
-            type="password"
-            value={samsarApiKey}
-            onChange={(event) => setSamsarApiKey(event.target.value)}
-            placeholder={envStatus?.samsarConfigured ? "Configured" : "Paste key"}
-          />
-        </label>
-        <label>
           <span>RunwayML API key</span>
           <input
             type="password"
             value={runwayApiKey}
             onChange={(event) => setRunwayApiKey(event.target.value)}
-            placeholder={envStatus?.runwayConfigured ? "Configured" : "Paste key"}
+            placeholder={setup?.runwayConfigured ? "Configured" : "Paste key"}
+          />
+        </label>
+        <label>
+          <span>Samsar.one API key</span>
+          <input
+            type="password"
+            value={samsarApiKey}
+            onChange={(event) => setSamsarApiKey(event.target.value)}
+            placeholder={setup?.samsarConfigured ? "Configured" : "Paste key"}
           />
         </label>
 
@@ -794,7 +780,6 @@ export default function FlashReelsApp() {
   const [user, setUser] = useState<User | null>(null);
   const [booting, setBooting] = useState(true);
   const [mode, setMode] = useState<Mode>("text_to_video");
-  const [environment, setEnvironment] = useState<EnvironmentName>("staging");
   const [prompt, setPrompt] = useState(TEXT_PROMPT);
   const [imageUrls, setImageUrls] = useState("");
   const [aspectRatio, setAspectRatio] = useState<"16:9" | "9:16">("16:9");
@@ -851,7 +836,7 @@ export default function FlashReelsApp() {
     setPolling(true);
     try {
       const data = await readApi<ApiRecord>(
-        buildDetailedStatusUrl(requestId, environment),
+        buildDetailedStatusUrl(requestId),
       );
       setStatus(data);
       setError("");
@@ -860,7 +845,7 @@ export default function FlashReelsApp() {
     } finally {
       setPolling(false);
     }
-  }, [environment, requestId]);
+  }, [requestId]);
 
   useEffect(() => {
     async function boot() {
@@ -870,7 +855,6 @@ export default function FlashReelsApp() {
           readApi<{ user: User | null }>("/api/auth/me"),
         ]);
         setSetup(setupData);
-        setEnvironment(setupData.activeEnvironment);
         setUser(authData.user);
       } finally {
         setBooting(false);
@@ -938,7 +922,6 @@ export default function FlashReelsApp() {
           aspectRatio,
           duration,
           enableSubtitles,
-          environment,
         }),
       });
       const nextRequestId = getRequestId(data);
@@ -947,7 +930,7 @@ export default function FlashReelsApp() {
       }
       setStatus(data);
       setRequestId(nextRequestId);
-      const detailedData = await readApi<ApiRecord>(buildDetailedStatusUrl(nextRequestId, environment));
+      const detailedData = await readApi<ApiRecord>(buildDetailedStatusUrl(nextRequestId));
       setStatus(detailedData);
     } catch (startError) {
       setError(startError instanceof Error ? startError.message : "Unable to start render.");
@@ -965,9 +948,9 @@ export default function FlashReelsApp() {
     try {
       const data = await readApi<ApiRecord>("/api/samsar/step/process-next", {
         method: "POST",
-        body: JSON.stringify({ request_id: requestId, environment }),
+        body: JSON.stringify({ request_id: requestId }),
       });
-      const detailedData = await readApi<ApiRecord>(buildDetailedStatusUrl(getRequestId(data) || requestId, environment));
+      const detailedData = await readApi<ApiRecord>(buildDetailedStatusUrl(getRequestId(data) || requestId));
       setStatus(detailedData);
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "Unable to continue to next step.");
@@ -989,7 +972,6 @@ export default function FlashReelsApp() {
           title: prompt.slice(0, 72),
           mode,
           prompt,
-          environment,
           sourceUrl: finalVideoUrl,
           samsarRequestId: requestId,
           samsarSessionId: getRequestId(status),
@@ -1026,7 +1008,7 @@ export default function FlashReelsApp() {
   }
 
   if (!setup?.ready) {
-    return <SetupWizard setup={setup} onUpdated={(nextSetup) => { setSetup(nextSetup); setEnvironment(nextSetup.activeEnvironment); }} />;
+    return <SetupWizard setup={setup} onUpdated={setSetup} />;
   }
 
   if (!user) {

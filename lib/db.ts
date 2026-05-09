@@ -4,7 +4,6 @@ import { readPersistentJson, writePersistentJson } from "@/lib/persistent-store"
 const DB_KEY = "flashreels:db:v1";
 const DB_FILE = "db.json";
 
-export type FlashReelsEnvironment = "staging" | "production";
 export type FlashReelsMode = "text_to_video" | "image_list_to_video";
 
 export interface FlashReelsUser {
@@ -24,7 +23,6 @@ export interface FlashReelsVideo {
   title: string;
   mode: FlashReelsMode;
   prompt: string;
-  environment: FlashReelsEnvironment;
   sourceUrl: string;
   samsarRequestId?: string;
   samsarSessionId?: string;

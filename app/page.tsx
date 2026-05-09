@@ -7,8 +7,8 @@ const sections = [
     body: "Placeholder text for the guided production flow. This area will describe how creators inspect each generation stage before committing to the next one.",
   },
   {
-    title: "Runway-backed adapters",
-    body: "Placeholder text for external model routing, completion polling, and custom definitions passed into Samsar step video routes.",
+    title: "RunwayML generation",
+    body: "Placeholder text for RunwayML image and video generation, completion polling, and preview-ready output URLs.",
   },
   {
     title: "Private render library",
@@ -36,7 +36,7 @@ export default function LandingPage() {
             <p className="eyebrow">Generative video editor</p>
             <h1 id="hero-title">FlashReels</h1>
             <p>
-              Placeholder product copy for a fast, step-controlled video creation workspace over Samsar and Runway.
+              Placeholder product copy for a fast, step-controlled video creation workspace powered by RunwayML generation.
               We will update this messaging shortly.
             </p>
             <div className="heroActions">
