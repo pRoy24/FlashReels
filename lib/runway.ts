@@ -2,7 +2,7 @@ import { apiError, getRequestOrigin, normalizeString, trimTrailingSlash } from "
 import {
   getRunwayBaseUrl,
   getRunwayVersion,
-  requireRuntimeKeys,
+  getRuntimeKeys,
 } from "@/lib/secure-config";
 
 type InputPayload = Record<string, unknown>;
@@ -138,7 +138,10 @@ function buildPromptImage(input: InputPayload) {
 }
 
 async function runwayFetch(pathname: string, init: RequestInit = {}) {
-  const keys = await requireRuntimeKeys();
+  const keys = await getRuntimeKeys();
+  if (!keys.runwayApiKey) {
+    throw apiError("RunwayML API key is not configured.", 412);
+  }
   const response = await fetch(`${getRunwayBaseUrl()}${pathname}`, {
     ...init,
     headers: {

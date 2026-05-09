@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 
+import { requireAdapterAuth } from "@/lib/adapter-auth";
 import { jsonError, readJson } from "@/lib/http";
 import { submitRunwayImageToVideo } from "@/lib/runway";
 
 export async function POST(request: Request) {
   try {
     const body = await readJson<{ input?: Record<string, unknown> }>(request);
+    await requireAdapterAuth(request, body as Record<string, unknown>);
     const response = await submitRunwayImageToVideo({
       request,
       endpointPath: "/api/runway/image-to-video",

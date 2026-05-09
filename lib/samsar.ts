@@ -8,8 +8,8 @@ import SamsarClient, {
 
 import { requireSessionUser } from "@/lib/auth";
 import type { FlashReelsMode } from "@/lib/db";
-import { apiError, getRequestOrigin, normalizeString, trimTrailingSlash } from "@/lib/http";
-import { getRuntimeKeys, getSamsarSdkBaseUrl, requireRuntimeKeys } from "@/lib/secure-config";
+import { apiError, normalizeString } from "@/lib/http";
+import { getAdapterBaseUrl, getRuntimeKeys, getSamsarSdkBaseUrl, requireRuntimeKeys } from "@/lib/secure-config";
 
 interface StartPayload {
   mode?: FlashReelsMode;
@@ -71,16 +71,17 @@ function buildExternalUser(user: { id: string; email?: string; displayName?: str
   };
 }
 
-function buildCustomAdapters(request: Request) {
-  const baseUrl = trimTrailingSlash(getRequestOrigin(request));
+function buildCustomAdapters(request: Request, serverSecret: string) {
+  const baseUrl = getAdapterBaseUrl(request);
   return {
     base_url: baseUrl,
     text_to_image: "/api/runway/text-to-image",
     image_to_video: "/api/runway/image-to-video",
+    api_key: serverSecret,
   };
 }
 
-function buildCommonInput(request: Request, payload: StartPayload) {
+function buildCommonInput(request: Request, payload: StartPayload, serverSecret: string) {
   const prompt = normalizeString(payload.prompt);
   if (!prompt) {
     throw apiError("Prompt is required.");
@@ -93,7 +94,7 @@ function buildCommonInput(request: Request, payload: StartPayload) {
     enable_subtitles: payload.enableSubtitles !== false,
     image_model: "NANOBANANA2",
     video_model: "RUNWAYML",
-    custom_adapters: buildCustomAdapters(request),
+    custom_adapters: buildCustomAdapters(request, serverSecret),
   };
 }
 
@@ -102,7 +103,7 @@ export async function startSamsarStepVideo(request: Request, payload: StartPaylo
   const keys = await requireRuntimeKeys();
   const client = getClient(keys.samsarApiKey);
   const mode = normalizeMode(payload.mode);
-  const commonInput = buildCommonInput(request, payload);
+  const commonInput = buildCommonInput(request, payload, keys.serverSecret);
 
   if (mode === "image_list_to_video") {
     const imageUrls = normalizeImageUrls(payload);

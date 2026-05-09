@@ -1,13 +1,13 @@
 import crypto from "node:crypto";
 import os from "node:os";
 
-import { apiError, trimTrailingSlash } from "@/lib/http";
+import { apiError, getRequestOrigin, normalizeString, trimTrailingSlash } from "@/lib/http";
 import { getPersistenceStatus, readPersistentJson, writePersistentJson } from "@/lib/persistent-store";
 
 const STORE_KEY = "flashreels:secrets:v1";
 const STORE_FILE = "secrets.json";
 
-type SecretName = "samsarApiKey" | "runwayApiKey";
+type SecretName = "samsarApiKey" | "runwayApiKey" | "serverSecret";
 
 interface EncryptedSecret {
   iv: string;
@@ -73,6 +73,7 @@ function normalizeStoredKeys(parsed: Partial<SecretStore> & { keys?: Record<stri
   return {
     ...(directKeys.samsarApiKey ? { samsarApiKey: directKeys.samsarApiKey } : {}),
     ...(directKeys.runwayApiKey ? { runwayApiKey: directKeys.runwayApiKey } : {}),
+    ...(directKeys.serverSecret ? { serverSecret: directKeys.serverSecret } : {}),
   };
 }
 
@@ -103,15 +104,44 @@ function envNames(secret: SecretName) {
   if (secret === "samsarApiKey") {
     return ["FLASHREELS_SAMSAR_API_KEY", "SAMSAR_API_KEY"];
   }
+  if (secret === "serverSecret") {
+    return ["FLASHREELS_SERVER_SECRET"];
+  }
   return ["FLASHREELS_RUNWAYML_API_KEY", "RUNWAYML_API_SECRET", "RUNWAY_API_KEY"];
 }
 
-export async function saveRuntimeKeys(payload: Record<string, unknown>) {
-  const samsarApiKey = typeof payload.samsarApiKey === "string" ? payload.samsarApiKey.trim() : "";
-  const runwayApiKey = typeof payload.runwayApiKey === "string" ? payload.runwayApiKey.trim() : "";
+function validateServerSecret(secret: string) {
+  if (secret.length < 24) {
+    throw apiError("Server secret must be at least 24 characters.", 422);
+  }
+  if (/\s/.test(secret)) {
+    throw apiError("Server secret must not contain whitespace.", 422);
+  }
 
-  if (!samsarApiKey && !runwayApiKey) {
-    throw apiError("Provide at least one API key to save.");
+  const categories = [
+    /[a-z]/.test(secret),
+    /[A-Z]/.test(secret),
+    /[0-9]/.test(secret),
+    /[^A-Za-z0-9]/.test(secret),
+  ].filter(Boolean).length;
+  if (categories < 3) {
+    throw apiError("Server secret must include at least three of: lowercase, uppercase, number, symbol.", 422);
+  }
+  if (/^(.)\1+$/.test(secret)) {
+    throw apiError("Server secret is too repetitive.", 422);
+  }
+}
+
+export async function saveRuntimeKeys(payload: Record<string, unknown>) {
+  const samsarApiKey = normalizeString(payload.samsarApiKey);
+  const runwayApiKey = normalizeString(payload.runwayApiKey);
+  const serverSecret = normalizeString(payload.serverSecret);
+
+  if (!samsarApiKey && !runwayApiKey && !serverSecret) {
+    throw apiError("Provide at least one key or server secret to save.");
+  }
+  if (serverSecret) {
+    validateServerSecret(serverSecret);
   }
 
   const store = await readStore();
@@ -119,6 +149,7 @@ export async function saveRuntimeKeys(payload: Record<string, unknown>) {
     ...store.keys,
     ...(samsarApiKey ? { samsarApiKey: encrypt(samsarApiKey) } : {}),
     ...(runwayApiKey ? { runwayApiKey: encrypt(runwayApiKey) } : {}),
+    ...(serverSecret ? { serverSecret: encrypt(serverSecret) } : {}),
   };
   store.updatedAt = new Date().toISOString();
   await writeStore(store);
@@ -129,15 +160,22 @@ export async function getRuntimeKeys() {
   const store = await readStore();
   const samsarEnv = envValue(envNames("samsarApiKey"));
   const runwayEnv = envValue(envNames("runwayApiKey"));
+  const serverSecretEnv = envValue(envNames("serverSecret"));
   const samsarApiKey = samsarEnv.value || decrypt(store.keys.samsarApiKey);
   const runwayApiKey = runwayEnv.value || decrypt(store.keys.runwayApiKey);
+  const serverSecret = serverSecretEnv.value || decrypt(store.keys.serverSecret);
+  if (serverSecret) {
+    validateServerSecret(serverSecret);
+  }
 
   return {
     samsarApiKey,
     runwayApiKey,
+    serverSecret,
     sources: {
       samsarApiKey: samsarEnv.value ? samsarEnv.source : samsarApiKey ? "encrypted_store" : "",
       runwayApiKey: runwayEnv.value ? runwayEnv.source : runwayApiKey ? "encrypted_store" : "",
+      serverSecret: serverSecretEnv.value ? serverSecretEnv.source : serverSecret ? "encrypted_store" : "",
     },
   };
 }
@@ -150,6 +188,9 @@ export async function requireRuntimeKeys() {
   if (!keys.runwayApiKey) {
     throw apiError("RunwayML API key is not configured.", 412);
   }
+  if (!keys.serverSecret) {
+    throw apiError("Server secret is not configured.", 412);
+  }
   return keys;
 }
 
@@ -158,15 +199,27 @@ export async function getSetupStatus() {
   return {
     samsarConfigured: Boolean(keys.samsarApiKey),
     runwayConfigured: Boolean(keys.runwayApiKey),
+    serverSecretConfigured: Boolean(keys.serverSecret),
     samsarSource: keys.sources.samsarApiKey,
     runwaySource: keys.sources.runwayApiKey,
+    serverSecretSource: keys.sources.serverSecret,
     envVars: {
       samsar: envNames("samsarApiKey").slice(0, 1),
       runway: envNames("runwayApiKey").slice(0, 1),
+      serverSecret: envNames("serverSecret"),
     },
     persistence: getPersistenceStatus(),
-    ready: Boolean(keys.samsarApiKey && keys.runwayApiKey),
+    publicBaseUrl: getConfiguredPublicBaseUrl(),
+    ready: Boolean(keys.samsarApiKey && keys.runwayApiKey && keys.serverSecret),
   };
+}
+
+export function getConfiguredPublicBaseUrl() {
+  return trimTrailingSlash(process.env.FLASHREELS_PUBLIC_BASE_URL || "");
+}
+
+export function getAdapterBaseUrl(request: Request) {
+  return getConfiguredPublicBaseUrl() || trimTrailingSlash(getRequestOrigin(request));
 }
 
 export function getSamsarSdkBaseUrl() {

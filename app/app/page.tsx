@@ -34,8 +34,11 @@ interface SetupStatus {
   ready: boolean;
   samsarConfigured: boolean;
   runwayConfigured: boolean;
+  serverSecretConfigured: boolean;
   samsarSource: string;
   runwaySource: string;
+  serverSecretSource: string;
+  publicBaseUrl?: string;
   persistence?: {
     provider: string;
     persistent: boolean;
@@ -407,6 +410,7 @@ function SetupWizard({
 }) {
   const [samsarApiKey, setSamsarApiKey] = useState("");
   const [runwayApiKey, setRunwayApiKey] = useState("");
+  const [serverSecret, setServerSecret] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -419,10 +423,12 @@ function SetupWizard({
         body: JSON.stringify({
           samsarApiKey,
           runwayApiKey,
+          serverSecret,
         }),
       });
       setSamsarApiKey("");
       setRunwayApiKey("");
+      setServerSecret("");
       onUpdated(nextSetup);
     } catch (setupError) {
       setError(setupError instanceof Error ? setupError.message : "Unable to save setup.");
@@ -445,10 +451,11 @@ function SetupWizard({
         <div className="setupStatusGrid">
           <StatusPill ready={Boolean(setup?.runwayConfigured)} label="RunwayML API key" source={setup?.runwaySource} />
           <StatusPill ready={Boolean(setup?.samsarConfigured)} label="Samsar API key" source={setup?.samsarSource} />
+          <StatusPill ready={Boolean(setup?.serverSecretConfigured)} label="Server secret" source={setup?.serverSecretSource} />
           <StatusPill
-            ready={Boolean(setup?.persistence?.persistent)}
-            label={setup?.persistence?.persistent ? "Vercel Redis" : "Local fallback"}
-            source={setup?.persistence?.redisEnv?.url || setup?.persistence?.provider}
+            ready={Boolean(setup?.publicBaseUrl)}
+            label={setup?.publicBaseUrl ? "Public callbacks" : "Instance callbacks"}
+            source={setup?.publicBaseUrl || "request origin"}
           />
         </div>
 
@@ -470,10 +477,19 @@ function SetupWizard({
             placeholder={setup?.samsarConfigured ? "Configured" : "Paste key"}
           />
         </label>
+        <label>
+          <span>Server secret</span>
+          <input
+            type="password"
+            value={serverSecret}
+            onChange={(event) => setServerSecret(event.target.value)}
+            placeholder={setup?.serverSecretConfigured ? "Configured" : "24+ chars, mixed character types"}
+          />
+        </label>
 
         {error ? <div className="errorBox">{error}</div> : null}
 
-        <button className="primaryButton" onClick={submit} disabled={saving || (!samsarApiKey && !runwayApiKey)}>
+        <button className="primaryButton" onClick={submit} disabled={saving || (!samsarApiKey && !runwayApiKey && !serverSecret)}>
           {saving ? <Loader2 className="spin" size={17} /> : <Check size={17} />}
           Save secure setup
         </button>
