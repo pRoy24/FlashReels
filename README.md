@@ -1,25 +1,14 @@
 # FlashReels
 
-<div align="center">
-  <img src="https://logo.clearbit.com/runwayml.com" alt="RunwayML logo" width="72" height="72" />
-
 | Coming Soon |
 | --- |
 | **A minimal, step-controlled reel production desk for marketing teams and video editors.** |
-
-</div>
 
 FlashReels is a Next.js workspace for prompt-led and image-led short-form video generation. It is built around RunwayML generation so teams can compose a request, preview each completed stage, and keep a lightweight private library of finished outputs.
 
 RunwayML is the primary creative generation provider for image and video assets. FlashReels uses it for text-to-image, image-to-video, task polling, and normalized output URLs. Defaults are `gen4_image` for images and `gen4.5` for image-to-video.
 
 `samsar-js` is used briefly as the orchestration layer for Samsar v2 step-video jobs: creating requests, checking detailed status, and advancing to the next stage.
-
-## Screenshots
-
-| Desktop | Mobile |
-| --- | --- |
-| ![FlashReels desktop setup screen](./public/screenshots/flashreels-app-desktop.png) | ![FlashReels mobile setup screen](./public/screenshots/flashreels-app-mobile.png) |
 
 ## Content Flow
 
