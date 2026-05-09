@@ -35,28 +35,85 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
   process.exit(1);
 }
 
+const TUNNEL_START_ATTEMPTS = 3;
+const TUNNEL_RESTART_DELAY_MS = 3000;
+
 let tunnel;
 let nextProcess;
+let shuttingDown = false;
+let restarting = false;
 
-async function shutdown(signal) {
-  if (nextProcess && !nextProcess.killed) {
-    nextProcess.kill(signal);
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function formatExit(code, signal) {
+  if (signal) {
+    return `signal ${signal}`;
   }
-  if (tunnel && !tunnel.killed) {
-    tunnel.kill(signal);
+  return `code ${code ?? "unknown"}`;
+}
+
+function cleanTunnelMessage(text) {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trimEnd())
+    .filter((line) => {
+      const trimmed = line.trim();
+      return (
+        trimmed &&
+        !trimmed.startsWith("at ") &&
+        !trimmed.startsWith("^") &&
+        !trimmed.startsWith("throw err;") &&
+        !trimmed.startsWith("Node.js v") &&
+        !/node_modules\/localtunnel\/.*\.js:\d+/.test(trimmed)
+      );
+    })
+    .join("\n");
+}
+
+function writeTunnelError(chunk) {
+  const message = cleanTunnelMessage(chunk.toString());
+  if (message) {
+    process.stderr.write(`[localtunnel] ${message}\n`);
   }
-  process.exit(signal === "SIGINT" || signal === "SIGTERM" ? 0 : 1);
+}
+
+function stopChild(child, signal = "SIGTERM") {
+  if (!child || child.killed || child.exitCode !== null || child.signalCode !== null) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve) => {
+    const timeout = setTimeout(resolve, 2000);
+    child.once("exit", () => {
+      clearTimeout(timeout);
+      resolve();
+    });
+    child.kill(signal);
+  });
+}
+
+async function shutdown(signal, exitCode = signal === "SIGINT" || signal === "SIGTERM" ? 0 : 1) {
+  shuttingDown = true;
+  await Promise.all([
+    stopChild(nextProcess, signal),
+    stopChild(tunnel, signal),
+  ]);
+  process.exit(exitCode);
 }
 
 process.on("SIGINT", () => void shutdown("SIGINT"));
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
 
-try {
-  tunnel = spawn("npx", ["-y", "localtunnel@2.0.2", "--port", String(port)], {
+function startTunnelOnce() {
+  const child = spawn("npx", ["-y", "localtunnel@2.0.2", "--port", String(port)], {
     stdio: ["ignore", "pipe", "pipe"],
   });
 
-  const publicUrl = await new Promise((resolve, reject) => {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let stderrBuffer = "";
     const timeout = setTimeout(() => reject(new Error("Timed out while starting the public callback tunnel.")), 30000);
 
     function inspectOutput(chunk) {
@@ -64,52 +121,111 @@ try {
       process.stdout.write(text);
       const match = text.match(/https:\/\/[^\s]+/);
       if (match) {
+        settled = true;
         clearTimeout(timeout);
-        resolve(match[0].replace(/\/+$/, ""));
+        resolve({ process: child, publicUrl: match[0].replace(/\/+$/, "") });
       }
     }
 
-    tunnel.stdout.on("data", inspectOutput);
-    tunnel.stderr.on("data", (chunk) => process.stderr.write(chunk));
-    tunnel.on("error", reject);
-    tunnel.on("exit", (code) => {
+    child.stdout.on("data", inspectOutput);
+    child.stderr.on("data", (chunk) => {
+      stderrBuffer += chunk.toString();
+      writeTunnelError(chunk);
+    });
+    child.on("error", (error) => {
       clearTimeout(timeout);
-      reject(new Error(`Public callback tunnel exited with code ${code ?? "unknown"}.`));
+      reject(error);
+    });
+    child.on("exit", (code, signal) => {
+      if (settled) {
+        return;
+      }
+      clearTimeout(timeout);
+      const detail = cleanTunnelMessage(stderrBuffer);
+      reject(new Error(
+        detail || `Public callback tunnel exited with ${formatExit(code, signal)}.`,
+      ));
     });
   });
-
-  console.log(`FlashReels public callback URL: ${publicUrl}`);
-
-  tunnel.removeAllListeners("exit");
-  tunnel.on("exit", () => {
-    console.error("FlashReels public callback tunnel closed.");
-    if (nextProcess && !nextProcess.killed) {
-      nextProcess.kill("SIGTERM");
-    }
-  });
-
-  const nextArgs = ["next", "dev", "--webpack", "--port", String(port), ...args];
-  nextProcess = spawn("npx", nextArgs, {
-    stdio: "inherit",
-    env: {
-      ...process.env,
-      FLASHREELS_PUBLIC_BASE_URL: publicUrl,
-      FLASHREELS_LOCAL_TUNNEL: "1",
-      PORT: String(port),
-    },
-  });
-
-  nextProcess.on("exit", async (code, signal) => {
-    if (tunnel && !tunnel.killed) {
-      tunnel.kill("SIGTERM");
-    }
-    if (signal) {
-      process.kill(process.pid, signal);
-      return;
-    }
-    process.exit(code ?? 0);
-  });
-} catch (error) {
-  console.error(error instanceof Error ? error.message : "Unable to start FlashReels local tunnel.");
-  await shutdown("SIGTERM");
 }
+
+async function startTunnelWithRetry() {
+  let lastError;
+  for (let attempt = 1; attempt <= TUNNEL_START_ATTEMPTS; attempt += 1) {
+    try {
+      return await startTunnelOnce();
+    } catch (error) {
+      lastError = error;
+      if (shuttingDown || attempt === TUNNEL_START_ATTEMPTS) {
+        break;
+      }
+      console.error(`FlashReels public callback tunnel failed to start. Retrying (${attempt + 1}/${TUNNEL_START_ATTEMPTS})...`);
+      await wait(1000 * attempt);
+    }
+  }
+  throw lastError;
+}
+
+async function restartDevServer(reason) {
+  if (shuttingDown || restarting) {
+    return;
+  }
+
+  restarting = true;
+  console.error(`${reason} Restarting FlashReels dev server with a fresh callback URL...`);
+  await Promise.all([
+    stopChild(nextProcess),
+    stopChild(tunnel),
+  ]);
+  nextProcess = undefined;
+  tunnel = undefined;
+  restarting = false;
+  await wait(TUNNEL_RESTART_DELAY_MS);
+  await startDevServer();
+}
+
+async function startDevServer() {
+  try {
+    const startedTunnel = await startTunnelWithRetry();
+    tunnel = startedTunnel.process;
+    const publicUrl = startedTunnel.publicUrl;
+
+    console.log(`FlashReels public callback URL: ${publicUrl}`);
+
+    tunnel.on("exit", (code, signal) => {
+      if (shuttingDown || restarting) {
+        return;
+      }
+      void restartDevServer(`FlashReels public callback tunnel closed with ${formatExit(code, signal)}.`);
+    });
+
+    const nextArgs = ["next", "dev", "--webpack", "--port", String(port), ...args];
+    nextProcess = spawn("npx", nextArgs, {
+      stdio: "inherit",
+      env: {
+        ...process.env,
+        FLASHREELS_PUBLIC_BASE_URL: publicUrl,
+        FLASHREELS_LOCAL_TUNNEL: "1",
+        PORT: String(port),
+      },
+    });
+
+    nextProcess.on("exit", async (code, signal) => {
+      if (shuttingDown || restarting) {
+        return;
+      }
+      shuttingDown = true;
+      await stopChild(tunnel);
+      if (signal) {
+        process.kill(process.pid, signal);
+        return;
+      }
+      process.exit(code ?? 0);
+    });
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : "Unable to start FlashReels local tunnel.");
+    await shutdown("SIGTERM", 1);
+  }
+}
+
+await startDevServer();

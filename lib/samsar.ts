@@ -1,5 +1,10 @@
 import SamsarClient, {
+  type JoinVideosInput,
+  type JoinVideosResponse,
+  type TranslateVideoInput,
+  type TranslateVideoResponse,
   type CreateV2StepImageToVideoInput,
+  type GlobalStatusDetailedResponse,
   type V2StepVideoDetailedStatusResponse,
   type V2StepVideoStatusResponse,
 } from "samsar-js";
@@ -7,7 +12,13 @@ import SamsarClient, {
 import { requireSessionUser } from "@/lib/auth";
 import { normalizeImageListCreatorPayload } from "@/lib/creator";
 import { apiError } from "@/lib/http";
-import { getAdapterBaseUrl, getRuntimeKeys, getSamsarSdkBaseUrl, requireRuntimeKeys } from "@/lib/secure-config";
+import {
+  getAdapterBaseUrl,
+  getRuntimeKeys,
+  getSamsarSdkBaseUrl,
+  requireRuntimeKeys,
+  shouldUseCustomAdapters,
+} from "@/lib/secure-config";
 
 type StartPayload = Record<string, unknown>;
 
@@ -40,6 +51,8 @@ function buildCustomAdapters(request: Request, serverSecret: string) {
   };
 }
 
+const DEFAULT_MANUAL_STEP_STAGES = ["ai_video_generation"];
+
 export async function startSamsarStepVideo(request: Request, payload: StartPayload) {
   const user = await requireSessionUser(request);
   const keys = await requireRuntimeKeys();
@@ -49,7 +62,13 @@ export async function startSamsarStepVideo(request: Request, payload: StartPaylo
   );
   const input: CreateV2StepImageToVideoInput = {
     ...normalizedPayload,
-    custom_adapters: buildCustomAdapters(request, keys.serverSecret),
+    manual_step_stages:
+      normalizedPayload.manual_step_stages ||
+      normalizedPayload.manualStepStages ||
+      DEFAULT_MANUAL_STEP_STAGES,
+    ...(shouldUseCustomAdapters()
+      ? { custom_adapters: buildCustomAdapters(request, keys.serverSecret) }
+      : {}),
   };
   const response = await client.createV2StepImageToVideo(input, {
     externalUser: buildExternalUser(user),
@@ -74,6 +93,46 @@ export async function getSamsarStepStatusDetailed(
 }
 
 export const getSamsarStepStatus = getSamsarStepStatusDetailed;
+
+export async function getSamsarVideoStatusDetailed(
+  request: Request,
+  requestId: string,
+): Promise<GlobalStatusDetailedResponse> {
+  const user = await requireSessionUser(request);
+  const keys = await getRuntimeKeys();
+  if (!keys.samsarApiKey) {
+    throw apiError("Samsar API key is not configured.", 412);
+  }
+  const client = getClient(keys.samsarApiKey);
+  const response = await client.getV2StatusDetailed(requestId, {
+    externalUser: buildExternalUser(user),
+  });
+  return response.data;
+}
+
+export async function translateSamsarVideo(
+  request: Request,
+  input: TranslateVideoInput,
+): Promise<TranslateVideoResponse> {
+  const user = await requireSessionUser(request);
+  const keys = await requireRuntimeKeys();
+  const client = getClient(keys.samsarApiKey);
+  const response = await client.translateV2Video(input, {
+    externalUser: buildExternalUser(user),
+  });
+  return response.data as TranslateVideoResponse;
+}
+
+export async function joinSamsarVideos(
+  request: Request,
+  input: JoinVideosInput,
+): Promise<JoinVideosResponse> {
+  await requireSessionUser(request);
+  const keys = await requireRuntimeKeys();
+  const client = getClient(keys.samsarApiKey);
+  const response = await client.joinVideos(input);
+  return response.data;
+}
 
 export async function processNextSamsarStep(
   request: Request,

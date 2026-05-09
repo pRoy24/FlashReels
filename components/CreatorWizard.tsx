@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, type ChangeEvent, type ReactNode, type UIEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode, type UIEvent } from "react";
 import {
   AlertCircle,
   Code2,
@@ -30,6 +30,7 @@ type SubmitHandler = (payload: Record<string, unknown>) => void | Promise<void>;
 
 interface CreatorWizardProps {
   busy: boolean;
+  draftPayload?: Record<string, unknown> | null;
   onSubmit: SubmitHandler;
 }
 
@@ -47,6 +48,34 @@ function textAreaRows(text: string, minimum = 7) {
 
 function FieldLabel({ children }: { children: ReactNode }) {
   return <span>{children}</span>;
+}
+
+function firstString(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return "";
+}
+
+function payloadImageUrls(value: unknown) {
+  if (!Array.isArray(value)) {
+    return "";
+  }
+  return value
+    .map((item) => {
+      if (typeof item === "string") {
+        return item.trim();
+      }
+      if (item && typeof item === "object" && !Array.isArray(item)) {
+        const raw = item as Record<string, unknown>;
+        return firstString(raw.image_url, raw.imageUrl, raw.url, raw.src, raw.enhanced_url, raw.enhancedUrl, raw.source);
+      }
+      return "";
+    })
+    .filter(Boolean)
+    .join("\n");
 }
 
 const JSON_HIGHLIGHT_TOKEN = /"(?:\\.|[^"\\])*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|\b(?:true|false|null)\b|[{}\[\],:]/g;
@@ -94,7 +123,7 @@ function renderJsonHighlight(value: string) {
   return nodes;
 }
 
-export function CreatorWizard({ busy, onSubmit }: CreatorWizardProps) {
+export function CreatorWizard({ busy, draftPayload, onSubmit }: CreatorWizardProps) {
   const [tab, setTab] = useState<CreatorTab>("simple");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [prompt, setPrompt] = useState(DEFAULT_IMAGE_LIST_PROMPT);
@@ -121,6 +150,48 @@ export function CreatorWizard({ busy, onSubmit }: CreatorWizardProps) {
   const [metadataJson, setMetadataJson] = useState('{\n  "project": "launch"\n}');
   const [jsonText, setJsonText] = useState(DEFAULT_IMAGE_LIST_SAMPLE_JSON);
   const jsonHighlightRef = useRef<HTMLPreElement | null>(null);
+
+  useEffect(() => {
+    if (!draftPayload) {
+      return;
+    }
+
+    try {
+      const normalized = normalizeImageListCreatorPayload(draftPayload);
+      const metadata = normalized.metadata && typeof normalized.metadata === "object" && !Array.isArray(normalized.metadata)
+        ? normalized.metadata
+        : { project: "launch" };
+      const footerMetadata = Array.isArray(normalized.footer_metadata) ? normalized.footer_metadata[0] as Record<string, unknown> | undefined : undefined;
+
+      setPrompt(firstString(normalized.prompt) || DEFAULT_IMAGE_LIST_PROMPT);
+      setImageUrls(payloadImageUrls(normalized.image_urls));
+      setUploadedImageUrls([]);
+      setAspectRatio(firstString(normalized.aspect_ratio) === "9:16" ? "9:16" : "16:9");
+      setDuration(typeof normalized.duration === "number" ? normalized.duration : DEFAULT_DURATION);
+      setEnableSubtitles(normalized.enable_subtitles !== false);
+      setImageModel(firstString(normalized.image_model) || DEFAULT_IMAGE_MODEL);
+      setVideoModel(firstString(normalized.video_model) || DEFAULT_VIDEO_MODEL);
+      setVideoModelSubType(firstString(normalized.video_model_sub_type, normalized.videoModelSubType));
+      setCustomImageToVideoModel(firstString(normalized.custom_image_to_video_model));
+      setOutroUrl(firstString(normalized.cta_url));
+      setOutroImageUrl(firstString(normalized.outro_image_url));
+      setFooterUrl(firstString(normalized.footer_url, footerMetadata?.url, footerMetadata?.cta_url));
+      setFooterTitle(firstString(normalized.footer_title, footerMetadata?.title));
+      setEnableFooter(Boolean(normalized.add_footer_animation));
+      setEnableAvatar(normalized.add_narrator_avatar !== false);
+      setAvatarModel(firstString(normalized.avatar_model));
+      setLimitSingleNarrator(normalized.limit_single_narrator !== false);
+      setCtaTextTop(firstString(normalized.cta_text_top));
+      setCtaTextBottom(firstString(normalized.cta_text_bottom));
+      setCtaLogo(firstString(normalized.cta_logo));
+      setMetadataJson(JSON.stringify(metadata, null, 2));
+      setJsonText(imageListPayloadToJson(normalized));
+      setTab("simple");
+    } catch {
+      setJsonText(imageListPayloadToJson(draftPayload));
+      setTab("json");
+    }
+  }, [draftPayload]);
 
   const simplePayload = useMemo(() => {
     const footerEnabled = enableFooter || Boolean(footerUrl);
@@ -272,18 +343,14 @@ export function CreatorWizard({ busy, onSubmit }: CreatorWizardProps) {
           <p className="eyebrow">Image request</p>
           <h2>Create from images and metadata</h2>
         </div>
-        <div className="wizardHeaderMeta">
-          <span><Sparkles size={14} /> Simple</span>
-          <span><Code2 size={14} /> JSON</span>
-        </div>
       </div>
 
       <div className="segmented compact wizardTabs" role="tablist" aria-label="Creator wizard mode">
-        <button className={tab === "simple" ? "active" : ""} onClick={() => setTab("simple")} type="button">
-          Simple
+        <button className={tab === "simple" ? "active" : ""} onClick={() => setTab("simple")} type="button" aria-label="Use simple form" title="Simple form">
+          <Sparkles size={15} />
         </button>
-        <button className={tab === "json" ? "active" : ""} onClick={() => setTab("json")} type="button">
-          JSON
+        <button className={tab === "json" ? "active" : ""} onClick={() => setTab("json")} type="button" aria-label="Use JSON editor" title="JSON editor">
+          <Code2 size={15} />
         </button>
       </div>
 

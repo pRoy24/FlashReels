@@ -4,11 +4,16 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObjec
 import {
   ArrowRight,
   Check,
+  ChevronLeft,
+  ChevronRight,
   CircleDashed,
   Database,
+  Download,
   Film,
   Image as ImageIcon,
   KeyRound,
+  Languages,
+  ListVideo,
   Loader2,
   LogOut,
   Music,
@@ -62,8 +67,12 @@ interface LibraryVideo {
   mode: string;
   prompt: string;
   sourceUrl: string;
+  samsarRequestId?: string;
+  samsarSessionId?: string;
   status: string;
+  metadata?: Record<string, unknown>;
   createdAt: string;
+  updatedAt?: string;
 }
 
 const STAGE_ORDER = [
@@ -94,6 +103,25 @@ const STAGE_LABELS: Record<string, string> = {
   frame_generation: "Frames",
   video_generation: "Final render",
 };
+
+const SAMSAR_STATIC_ASSET_BASE_URL = (
+  process.env.NEXT_PUBLIC_SAMSAR_STATIC_ASSET_BASE_URL || "https://static.samsar.one"
+).replace(/\/+$/, "");
+
+const LANGUAGE_OPTIONS = [
+  { code: "es", label: "Spanish" },
+  { code: "fr", label: "French" },
+  { code: "de", label: "German" },
+  { code: "it", label: "Italian" },
+  { code: "pt", label: "Portuguese" },
+  { code: "hi", label: "Hindi" },
+  { code: "th", label: "Thai" },
+  { code: "ja", label: "Japanese" },
+  { code: "ko", label: "Korean" },
+  { code: "zh", label: "Chinese" },
+  { code: "ar", label: "Arabic" },
+  { code: "en", label: "English" },
+];
 
 function buildDetailedStatusUrl(requestId: string) {
   return `/api/samsar/step/status-detailed?request_id=${encodeURIComponent(requestId)}`;
@@ -134,6 +162,45 @@ function firstString(...values: unknown[]) {
   return "";
 }
 
+function firstArrayString(value: unknown) {
+  if (!Array.isArray(value)) {
+    return "";
+  }
+  for (const item of value) {
+    const normalized = getString(item);
+    if (normalized) {
+      return normalized;
+    }
+  }
+  return "";
+}
+
+function normalizeMediaUrl(url: string) {
+  const value = getString(url);
+  if (!value) {
+    return "";
+  }
+  try {
+    const parsed = new URL(value);
+    if (
+      /^api\.samsar\.(one|gg)$/i.test(parsed.hostname) &&
+      /^\/(?:video|user_resources)\//.test(parsed.pathname)
+    ) {
+      return `${SAMSAR_STATIC_ASSET_BASE_URL}${parsed.pathname}${parsed.search}`;
+    }
+  } catch {
+    // Relative paths are normalized below.
+  }
+  if (/^(https?:|data:|blob:)/i.test(value)) {
+    return value;
+  }
+  const assetPath = value
+    .replace(/^\/?assets\//, "")
+    .replace(/^\/?samsar_processor\/assets\//, "")
+    .replace(/^\/+/, "");
+  return assetPath ? `${SAMSAR_STATIC_ASSET_BASE_URL}/${assetPath}` : "";
+}
+
 function getRequestId(data: ApiRecord | null) {
   if (!data) {
     return "";
@@ -151,30 +218,61 @@ function getFinalVideoUrl(status: ApiRecord | null) {
   }
   const session = getRecord(status.session);
   const sessionResult = getRecord(session.result);
-  const currentResources = getRecord(getRecord(status.current_step_resources).resources);
+  const currentStep = firstString(
+    getRecord(status.current_step_resources).step,
+    getRecord(status.step).current_step,
+    status.current_step,
+    session.currentStage,
+  );
+  const currentResources = currentStep === "video_generation"
+    ? getRecord(getRecord(status.current_step_resources).resources)
+    : {};
   const completed = getRecord(status.completed_step_resources);
   const finalResources = getRecord(getRecord(completed.video_generation).resources);
-  return firstString(
+  const video = getRecord(status.video);
+  const output = getRecord(status.output);
+  const result = getRecord(status.result);
+  return normalizeMediaUrl(firstString(
     sessionResult.url,
     sessionResult.remoteURL,
     sessionResult.videoLink,
+    session.videoLink,
+    session.video_url,
+    session.videoUrl,
+    session.remoteVideoLink,
     finalResources.result_url,
     finalResources.remote_url,
     finalResources.video_link,
+    finalResources.videoLink,
+    result.url,
+    result.remoteURL,
+    result.videoLink,
+    video.url,
+    video.video_url,
+    output.url,
+    output.video_url,
     currentResources.result_url,
     currentResources.remote_url,
+    currentResources.video_link,
+    currentResources.videoLink,
     status.result_url,
     status.remoteURL,
     status.remote_url,
     status.video_url,
     status.videoLink,
-  );
+    firstArrayString(status.result_urls),
+  ));
+}
+
+function getSessionPreviewUrl(status: ApiRecord | null) {
+  return getFinalVideoUrl(status) || collectPreviewResources(status).at(-1)?.url || "";
 }
 
 function collectMediaUrls(value: unknown, result = new Set<string>()) {
   if (typeof value === "string") {
-    if (/^https?:\/\//i.test(value) || value.startsWith("data:image/")) {
-      result.add(value);
+    const normalizedUrl = normalizeMediaUrl(value);
+    if (normalizedUrl) {
+      result.add(normalizedUrl);
     }
     return result;
   }
@@ -196,6 +294,10 @@ function isAudioUrl(url: string) {
   return /\.(mp3|wav|m4a|aac|ogg|flac)(\?|$)/i.test(url) || url.includes("audio");
 }
 
+function isImageUrl(url: string) {
+  return /^data:image\//i.test(url) || /\.(png|jpe?g|webp|gif)(\?|$)/i.test(url);
+}
+
 function formatStageLabel(stage: string) {
   return STAGE_LABELS[stage] || stage.replaceAll("_", " ");
 }
@@ -209,6 +311,34 @@ function formatTime(value: number) {
 
 function getDetailedSession(status: ApiRecord | null) {
   return getRecord(status?.session);
+}
+
+function getLibraryStatus(video: LibraryVideo) {
+  return firstString(video.status, getStatusText(getRecord(video.metadata?.stepStatus))) || "PENDING";
+}
+
+function getLibraryRequestId(video: LibraryVideo) {
+  return firstString(video.samsarRequestId, video.samsarSessionId);
+}
+
+function getLibraryPayload(video: LibraryVideo) {
+  const metadata = getRecord(video.metadata);
+  return getRecord(metadata.payload);
+}
+
+function getLibraryStepStatus(video: LibraryVideo) {
+  const metadata = getRecord(video.metadata);
+  return getRecord(metadata.stepStatus);
+}
+
+function canUseLibraryVideo(video: LibraryVideo) {
+  const sourceUrl = video.sourceUrl || "";
+  return Boolean(
+    getLibraryRequestId(video) &&
+    sourceUrl &&
+    !isImageUrl(sourceUrl) &&
+    getLibraryStatus(video).toUpperCase() === "COMPLETED",
+  );
 }
 
 function getStageStatus(session: ApiRecord, stage: string) {
@@ -259,16 +389,18 @@ function collectPreviewResources(status: ApiRecord | null): StagePreviewResource
   const seen = new Set<string>();
 
   function addResource(resource: Omit<StagePreviewResource, "id"> & { id?: string }) {
-    if (!resource.url || seen.has(resource.url)) {
+    const normalizedUrl = normalizeMediaUrl(resource.url);
+    if (!normalizedUrl || seen.has(normalizedUrl)) {
       return;
     }
     const statusValue = resource.status || getStageStatus(session, resource.stage);
     if (!isStageComplete(session, resource.stage, statusValue)) {
       return;
     }
-    seen.add(resource.url);
+    seen.add(normalizedUrl);
     resources.push({
       ...resource,
+      url: normalizedUrl,
       id: resource.id || `${resource.stage}-${resources.length}`,
       status: statusValue || "COMPLETED",
     });
@@ -367,7 +499,7 @@ function collectPreviewResources(status: ApiRecord | null): StagePreviewResource
     });
   });
 
-  const resultUrl = firstString(getRecord(session.result).url);
+  const resultUrl = getFinalVideoUrl(status);
   if (resultUrl) {
     addResource({
       id: "final-result",
@@ -381,7 +513,15 @@ function collectPreviewResources(status: ApiRecord | null): StagePreviewResource
     });
   }
 
-  return resources.sort((a, b) => a.startTime - b.startTime || STAGE_ORDER.indexOf(a.stage) - STAGE_ORDER.indexOf(b.stage));
+  return resources.sort((a, b) => {
+    if (a.id === "final-result" && b.id !== "final-result") {
+      return 1;
+    }
+    if (b.id === "final-result" && a.id !== "final-result") {
+      return -1;
+    }
+    return a.startTime - b.startTime || STAGE_ORDER.indexOf(a.stage) - STAGE_ORDER.indexOf(b.stage);
+  });
 }
 
 async function readApi<T>(url: string, init?: RequestInit): Promise<T> {
@@ -773,8 +913,10 @@ function StagedPreviewPanel({
 }) {
   const session = getDetailedSession(status);
   const sequenceMediaRef = useRef<HTMLMediaElement | null>(null);
+  const autoPlayedFinalUrlRef = useRef("");
   const [isSequencePlaying, setIsSequencePlaying] = useState(false);
   const [playbackRequestId, setPlaybackRequestId] = useState(0);
+  const statusText = getStatusText(status).toUpperCase();
   const currentStage = firstString(session.currentStage, getRecord(status?.step).current_step, status?.current_step);
   const previewStage = firstString(session.previewStage);
   const completedStages = Array.isArray(session.completedStages) ? session.completedStages.map((stage) => getString(stage)).filter(Boolean) : [];
@@ -803,6 +945,19 @@ function StagedPreviewPanel({
     setIsSequencePlaying(true);
     setPlaybackRequestId((value) => value + 1);
   }
+
+  useEffect(() => {
+    if (statusText !== "COMPLETED") {
+      return;
+    }
+    const finalResource = resources.find((resource) => resource.id === "final-result" && resource.kind === "video")
+      || resources.find((resource) => resource.stage === "video_generation" && resource.kind === "video");
+    if (!finalResource || autoPlayedFinalUrlRef.current === finalResource.url) {
+      return;
+    }
+    autoPlayedFinalUrlRef.current = finalResource.url;
+    startPlayback(finalResource, 0);
+  }, [resources, statusText]);
 
   function toggleSequencePlayback() {
     if (isSequencePlaying) {
@@ -938,7 +1093,15 @@ function StagedPreviewPanel({
           </div>
           <p>{formatStageLabel(selectedResource.stage)} - {selectedResource.status}</p>
           {selectedResource.prompt ? <small>{selectedResource.prompt}</small> : null}
-          <a href={selectedResource.url} target="_blank" rel="noreferrer">Open resource</a>
+          <div className="resourceActions">
+            <a href={selectedResource.url} target="_blank" rel="noreferrer">Open resource</a>
+            {selectedResource.kind === "video" ? (
+              <a href={selectedResource.url} download target="_blank" rel="noreferrer">
+                <Download size={14} />
+                Download
+              </a>
+            ) : null}
+          </div>
         </div>
       ) : null}
 
@@ -984,18 +1147,37 @@ export default function FlashReelsApp() {
   const [library, setLibrary] = useState<LibraryVideo[]>([]);
   const [savedUrl, setSavedUrl] = useState("");
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [creatorOpen, setCreatorOpen] = useState(false);
   const [selectedResourceId, setSelectedResourceId] = useState("");
   const [timelineSeek, setTimelineSeek] = useState(0);
+  const [draftPayload, setDraftPayload] = useState<Record<string, unknown> | null>(null);
+  const [selectedLibraryIds, setSelectedLibraryIds] = useState<string[]>([]);
+  const [libraryLanguages, setLibraryLanguages] = useState<Record<string, string>>({});
+  const [libraryActionBusy, setLibraryActionBusy] = useState("");
   const statusText = getStatusText(status);
   const finalVideoUrl = getFinalVideoUrl(status);
   const step = getRecord(status?.step);
   const waitingForNext = Boolean(step.waiting_for_process_next || status?.waiting_for_process_next);
+  const requiresUserAction = Boolean(
+    step.requires_user_action ||
+    step.requiresUserAction ||
+    status?.requires_user_action ||
+    status?.requiresUserAction,
+  );
+  const canProcessNext = Boolean(
+    step.can_process_next ||
+    step.canProcessNext ||
+    status?.can_process_next ||
+    status?.canProcessNext ||
+    requiresUserAction,
+  );
   const nextStep = firstString(step.next_step, status?.next_step);
   const currentStep = firstString(step.current_step, status?.current_step);
   const currentStepLabel = currentStep ? formatStageLabel(currentStep) : "";
   const nextStepLabel = nextStep ? formatStageLabel(nextStep) : "";
   const terminal = ["FAILED", "CANCELED", "CANCELLED"].includes(statusText.toUpperCase());
-  const canContinue = statusText.toUpperCase() === "COMPLETED" && waitingForNext && Boolean(nextStep);
+  const activeStatus = ["PENDING", "RUNNING", "PROCESSING", "IN_PROGRESS"].includes(statusText.toUpperCase());
+  const canContinue = statusText.toUpperCase() === "COMPLETED" && waitingForNext && canProcessNext && Boolean(nextStep);
   const completedBlocks = useMemo(() => {
     const completed = getRecord(status?.completed_step_resources);
     return STAGE_ORDER
@@ -1003,14 +1185,24 @@ export default function FlashReelsApp() {
       .filter((block) => Object.keys(block).length > 0);
   }, [status]);
   const previewResources = useMemo(() => collectPreviewResources(status), [status]);
+  const finalPreviewResource = useMemo(() => (
+    previewResources.find((resource) => resource.id === "final-result" && resource.kind === "video") || null
+  ), [previewResources]);
   const selectedResource = useMemo(() => {
     if (previewResources.length === 0) {
       return null;
     }
+    const explicitResource = previewResources.find((resource) => resource.id === selectedResourceId);
+    if (explicitResource) {
+      return explicitResource;
+    }
+    if (finalPreviewResource && statusText.toUpperCase() === "COMPLETED") {
+      return finalPreviewResource;
+    }
     return previewResources.find((resource) => resource.id === selectedResourceId)
       || previewResources.find((resource) => timelineSeek >= resource.startTime && timelineSeek <= resource.endTime)
       || previewResources[previewResources.length - 1];
-  }, [previewResources, selectedResourceId, timelineSeek]);
+  }, [finalPreviewResource, previewResources, selectedResourceId, statusText, timelineSeek]);
 
   const loadLibrary = useCallback(async () => {
     if (!user) {
@@ -1019,6 +1211,54 @@ export default function FlashReelsApp() {
     const data = await readApi<{ videos: LibraryVideo[] }>("/api/library");
     setLibrary(data.videos);
   }, [user]);
+
+  const saveSessionSnapshot = useCallback(async (
+    snapshotStatus: ApiRecord | null,
+    snapshotRequestId: string,
+    snapshotPayload: Record<string, unknown> | null,
+    options: { refreshLibrary?: boolean } = {},
+  ) => {
+    if (!snapshotStatus || !snapshotRequestId) {
+      return null;
+    }
+
+    const sourceUrl = getSessionPreviewUrl(snapshotStatus);
+    const title = firstString(snapshotPayload?.prompt, getDetailedSession(snapshotStatus).title, snapshotRequestId, "Untitled render");
+    const snapshotStatusText = getStatusText(snapshotStatus);
+    const persistedStatus = snapshotStatusText === "IDLE" && snapshotRequestId ? "PENDING" : snapshotStatusText;
+    const video = await readApi<{ video: LibraryVideo }>("/api/library", {
+      method: "POST",
+      body: JSON.stringify({
+        title: title.slice(0, 72),
+        mode: "image_list_to_video",
+        prompt: title,
+        sourceUrl,
+        samsarRequestId: snapshotRequestId,
+        samsarSessionId: getRequestId(snapshotStatus) || snapshotRequestId,
+        status: persistedStatus,
+        metadata: {
+          payload: snapshotPayload || {},
+          stepStatus: snapshotStatus,
+        },
+      }),
+    });
+
+    if (sourceUrl) {
+      setSavedUrl(sourceUrl);
+    }
+    if (options.refreshLibrary !== false) {
+      await loadLibrary();
+    } else {
+      setLibrary((current) => {
+        const index = current.findIndex((item) => item.id === video.video.id);
+        if (index === -1) {
+          return [video.video, ...current];
+        }
+        return current.map((item) => item.id === video.video.id ? video.video : item);
+      });
+    }
+    return video.video;
+  }, [loadLibrary]);
 
   const pollStatus = useCallback(async () => {
     if (!requestId) {
@@ -1030,13 +1270,14 @@ export default function FlashReelsApp() {
         buildDetailedStatusUrl(requestId),
       );
       setStatus(data);
+      await saveSessionSnapshot(data, requestId, lastSubmission, { refreshLibrary: false });
       setError("");
     } catch (pollError) {
       setError(pollError instanceof Error ? pollError.message : "Unable to poll status.");
     } finally {
       setPolling(false);
     }
-  }, [requestId]);
+  }, [lastSubmission, requestId, saveSessionSnapshot]);
 
   const loadSetup = useCallback(async () => {
     const setupData = await readApi<SetupStatus>("/api/setup");
@@ -1084,17 +1325,23 @@ export default function FlashReelsApp() {
       setTimelineSeek(0);
       return;
     }
+    if (finalPreviewResource && statusText.toUpperCase() === "COMPLETED" && selectedResourceId !== finalPreviewResource.id) {
+      setSelectedResourceId(finalPreviewResource.id);
+      setTimelineSeek(finalPreviewResource.startTime);
+      return;
+    }
     if (!previewResources.some((resource) => resource.id === selectedResourceId)) {
       const nextResource = previewResources[previewResources.length - 1];
       setSelectedResourceId(nextResource.id);
       setTimelineSeek(nextResource.startTime);
     }
-  }, [previewResources, selectedResourceId]);
+  }, [finalPreviewResource, previewResources, selectedResourceId, statusText]);
 
   async function startRender(payload: Record<string, unknown>) {
     setBusy(true);
     setError("");
     setLastSubmission(payload);
+    setDraftPayload(payload);
     setStatus(null);
     setRequestId("");
     setSavedUrl("");
@@ -1113,6 +1360,7 @@ export default function FlashReelsApp() {
       setRequestId(nextRequestId);
       const detailedData = await readApi<ApiRecord>(buildDetailedStatusUrl(nextRequestId));
       setStatus(detailedData);
+      await saveSessionSnapshot(detailedData, nextRequestId, payload, { refreshLibrary: true });
     } catch (startError) {
       setError(startError instanceof Error ? startError.message : "Unable to start render.");
     } finally {
@@ -1133,6 +1381,7 @@ export default function FlashReelsApp() {
       });
       const detailedData = await readApi<ApiRecord>(buildDetailedStatusUrl(getRequestId(data) || requestId));
       setStatus(detailedData);
+      await saveSessionSnapshot(detailedData, requestId, lastSubmission, { refreshLibrary: true });
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "Unable to continue to next step.");
     } finally {
@@ -1140,38 +1389,150 @@ export default function FlashReelsApp() {
     }
   }
 
-  async function saveFinalVideo() {
-    if (!finalVideoUrl) {
+  async function saveCurrentSession() {
+    if (!requestId || !status) {
       return;
     }
     setBusy(true);
     setError("");
     try {
-      const title = firstString(lastSubmission?.prompt, "Untitled render");
-      await readApi<{ video: LibraryVideo }>("/api/library", {
-        method: "POST",
-        body: JSON.stringify({
-          title: title.slice(0, 72),
-          mode: "image_list_to_video",
-          prompt: title,
-          sourceUrl: finalVideoUrl,
-          samsarRequestId: requestId,
-          samsarSessionId: getRequestId(status),
-          status: statusText,
-          metadata: { stepStatus: status },
-        }),
-      });
-      setSavedUrl(finalVideoUrl);
-      await loadLibrary();
+      await saveSessionSnapshot(status, requestId, lastSubmission, { refreshLibrary: true });
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "Unable to save video.");
+      setError(saveError instanceof Error ? saveError.message : "Unable to save session.");
     } finally {
       setBusy(false);
     }
   }
 
+  async function loadPreviousSession(video: LibraryVideo) {
+    const previousRequestId = getLibraryRequestId(video);
+    const previousStatus = getLibraryStepStatus(video);
+    const previousPayload = getLibraryPayload(video);
+    if (!previousRequestId) {
+      setError("This library item does not have a Samsar session id.");
+      return;
+    }
+
+    setBusy(true);
+    setError("");
+    setRequestId(previousRequestId);
+    setLastSubmission(Object.keys(previousPayload).length > 0 ? previousPayload : null);
+    setDraftPayload(Object.keys(previousPayload).length > 0 ? previousPayload : null);
+    setStatus(Object.keys(previousStatus).length > 0 ? previousStatus : {
+      request_id: previousRequestId,
+      status: getLibraryStatus(video),
+    });
+    setSavedUrl(video.sourceUrl || "");
+    setSelectedResourceId("");
+    setTimelineSeek(0);
+    setLibraryOpen(false);
+
+    try {
+      const detailedData = await readApi<ApiRecord>(buildDetailedStatusUrl(previousRequestId));
+      setStatus(detailedData);
+      await saveSessionSnapshot(detailedData, previousRequestId, Object.keys(previousPayload).length > 0 ? previousPayload : null, { refreshLibrary: true });
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Unable to refresh the previous session.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function toggleLibrarySelection(video: LibraryVideo, checked: boolean) {
+    if (!canUseLibraryVideo(video)) {
+      return;
+    }
+    setSelectedLibraryIds((current) => {
+      if (checked) {
+        return current.includes(video.id) ? current : [...current, video.id];
+      }
+      return current.filter((videoId) => videoId !== video.id);
+    });
+  }
+
+  async function startRetranslation(video: LibraryVideo) {
+    const language = libraryLanguages[video.id] || LANGUAGE_OPTIONS[0].code;
+    setBusy(true);
+    setLibraryActionBusy(`retranslate:${video.id}`);
+    setError("");
+    try {
+      const data = await readApi<ApiRecord>("/api/samsar/video/retranslate", {
+        method: "POST",
+        body: JSON.stringify({ videoId: video.id, language }),
+      });
+      const nextRequestId = getRequestId(data);
+      if (!nextRequestId) {
+        throw new Error("Samsar did not return a request id for the translation.");
+      }
+      const languageLabel = LANGUAGE_OPTIONS.find((option) => option.code === language)?.label || language.toUpperCase();
+      const payload = {
+        operation: "retranslate",
+        sourceVideoId: video.id,
+        prompt: `${video.title} (${languageLabel})`,
+        language,
+      };
+      setRequestId(nextRequestId);
+      setStatus(data);
+      setLastSubmission(payload);
+      setDraftPayload(null);
+      setSelectedResourceId("");
+      setTimelineSeek(0);
+      setLibraryOpen(false);
+      await saveSessionSnapshot(data, nextRequestId, payload, { refreshLibrary: true });
+    } catch (translateError) {
+      setError(translateError instanceof Error ? translateError.message : "Unable to start retranslation.");
+    } finally {
+      setBusy(false);
+      setLibraryActionBusy("");
+    }
+  }
+
+  async function joinSelectedVideos() {
+    const videosToJoin = selectedLibraryIds
+      .map((videoId) => library.find((video) => video.id === videoId))
+      .filter((video): video is LibraryVideo => Boolean(video && canUseLibraryVideo(video)));
+    if (videosToJoin.length < 2) {
+      setError("Select at least two completed videos to join.");
+      return;
+    }
+
+    setBusy(true);
+    setLibraryActionBusy("join");
+    setError("");
+    try {
+      const data = await readApi<ApiRecord>("/api/samsar/video/join", {
+        method: "POST",
+        body: JSON.stringify({ videoIds: videosToJoin.map((video) => video.id), blendScenes: true }),
+      });
+      const nextRequestId = getRequestId(data);
+      if (!nextRequestId) {
+        throw new Error("Samsar did not return a request id for the joined reel.");
+      }
+      const payload = {
+        operation: "join",
+        sourceVideoIds: videosToJoin.map((video) => video.id),
+        prompt: `Joined reel: ${videosToJoin.map((video) => video.title).join(" + ")}`,
+      };
+      setRequestId(nextRequestId);
+      setStatus(data);
+      setLastSubmission(payload);
+      setDraftPayload(null);
+      setSelectedResourceId("");
+      setTimelineSeek(0);
+      setSelectedLibraryIds([]);
+      setLibraryOpen(false);
+      await saveSessionSnapshot(data, nextRequestId, payload, { refreshLibrary: true });
+    } catch (joinError) {
+      setError(joinError instanceof Error ? joinError.message : "Unable to join videos.");
+    } finally {
+      setBusy(false);
+      setLibraryActionBusy("");
+    }
+  }
+
   async function removeVideo(videoId: string) {
     await readApi(`/api/library/${encodeURIComponent(videoId)}`, { method: "DELETE" });
+    setSelectedLibraryIds((current) => current.filter((selectedVideoId) => selectedVideoId !== videoId));
     await loadLibrary();
   }
 
@@ -1221,7 +1582,7 @@ export default function FlashReelsApp() {
 
         <div className="topbarActions">
           <div className={`statusBadge status-${statusText.toLowerCase()}`}>
-            {polling ? <Loader2 className="spin" size={16} /> : <CircleDashed size={16} />}
+            {polling || activeStatus ? <Loader2 className="spin" size={16} /> : statusText.toUpperCase() === "COMPLETED" ? <Check size={16} /> : <CircleDashed size={16} />}
             {statusText}
           </div>
           <div className="accountChip">
@@ -1242,9 +1603,28 @@ export default function FlashReelsApp() {
             </div>
           </header>
 
-          <div className="studioGrid">
+          <div className={`studioGrid ${creatorOpen ? "creatorOverlayOpen" : ""}`}>
             <div className="creatorColumn">
-              <CreatorWizard busy={busy} onSubmit={startRender} />
+              <section className={`creatorPanelShell ${creatorOpen ? "expanded" : "collapsed"}`}>
+                <button
+                  className="creatorPanelToggle"
+                  onClick={() => setCreatorOpen((open) => !open)}
+                  type="button"
+                  aria-expanded={creatorOpen}
+                >
+                  <span className="creatorToggleIcon">
+                    <ImageIcon size={17} />
+                  </span>
+                  <span className="creatorToggleCopy">
+                    <strong>New render</strong>
+                    <small>{creatorOpen ? "Collapse panel" : "Expand panel"}</small>
+                  </span>
+                  {creatorOpen ? <ChevronLeft size={17} /> : <ChevronRight size={17} />}
+                </button>
+                <div className="creatorPanelBody">
+                  <CreatorWizard busy={busy} draftPayload={draftPayload} onSubmit={startRender} />
+                </div>
+              </section>
               {error ? <div className="errorBox">{error}</div> : null}
             </div>
 
@@ -1255,9 +1635,16 @@ export default function FlashReelsApp() {
                   <h2>{requestId || "Not started"}</h2>
                   <span>{currentStep || "Compose a request to begin"}</span>
                 </div>
-                <button className="iconButton" onClick={pollStatus} disabled={!requestId || polling} aria-label="Refresh status">
-                  {polling ? <Loader2 className="spin" size={17} /> : <RefreshCcw size={17} />}
-                </button>
+                <div className="previewHeaderActions">
+                  {finalVideoUrl ? (
+                    <a className="iconButton" href={finalVideoUrl} download target="_blank" rel="noreferrer" aria-label="Download completed video">
+                      <Download size={17} />
+                    </a>
+                  ) : null}
+                  <button className="iconButton" onClick={pollStatus} disabled={!requestId || polling} aria-label="Refresh status">
+                    {polling ? <Loader2 className="spin" size={17} /> : <RefreshCcw size={17} />}
+                  </button>
+                </div>
               </div>
 
               <StagedPreviewPanel
@@ -1272,17 +1659,17 @@ export default function FlashReelsApp() {
               <div className="actionRow">
                 <div className={`approvalPanel ${canContinue ? "ready" : ""}`}>
                   <div>
-                    <span>{canContinue ? `${currentStepLabel} ready for review` : "Approval checkpoint"}</span>
-                    <strong>{canContinue ? `Approve ${nextStepLabel}` : "Waiting for the current stage"}</strong>
+                    <span>{canContinue ? `${currentStepLabel} ready for review` : requiresUserAction ? "Approval required" : "Express pipeline running"}</span>
+                    <strong>{canContinue ? `Approve ${nextStepLabel}` : activeStatus ? `${currentStepLabel || "Current stage"} in progress` : "No approval needed"}</strong>
                   </div>
                 </div>
                 <button className="primaryButton" onClick={processNext} disabled={!canContinue || busy}>
                   {busy ? <Loader2 className="spin" size={16} /> : <ArrowRight size={16} />}
                   {canContinue ? `Approve and start ${nextStepLabel}` : "Approve next stage"}
                 </button>
-                <button className="secondaryButton" onClick={saveFinalVideo} disabled={!finalVideoUrl || savedUrl === finalVideoUrl || busy}>
+                <button className="secondaryButton" onClick={saveCurrentSession} disabled={!requestId || !status || busy}>
                   <Save size={16} />
-                  {finalVideoUrl && savedUrl === finalVideoUrl ? "Saved" : "Save render"}
+                  {finalVideoUrl && savedUrl === finalVideoUrl ? "Saved" : "Save session"}
                 </button>
               </div>
 
@@ -1315,21 +1702,88 @@ export default function FlashReelsApp() {
         <div className="libraryList" aria-hidden={!libraryOpen}>
           {library.length === 0 ? (
             <div className="placeholderBlock">No saved videos yet.</div>
-          ) : library.map((video) => (
+          ) : (
+            <>
+              <div className="libraryBulkBar">
+                <span>{selectedLibraryIds.length} selected</span>
+                <button
+                  type="button"
+                  onClick={joinSelectedVideos}
+                  disabled={selectedLibraryIds.length < 2 || busy || libraryActionBusy === "join"}
+                >
+                  {libraryActionBusy === "join" ? <Loader2 className="spin" size={15} /> : <ListVideo size={15} />}
+                  Join reel
+                </button>
+              </div>
+              {library.map((video) => {
+            const libraryStatus = getLibraryStatus(video);
+            const sourceUrl = video.sourceUrl || "";
+            const sourceIsImage = isImageUrl(sourceUrl);
+            const sourceIsVideo = sourceUrl && !sourceIsImage;
+            const usableVideo = canUseLibraryVideo(video);
+            const language = libraryLanguages[video.id] || LANGUAGE_OPTIONS[0].code;
+            return (
             <article className="libraryCard" key={video.id}>
-              <video src={video.sourceUrl} muted playsInline />
-              <div>
-                <strong>{video.title}</strong>
-                <span>{video.mode.replaceAll("_", " ")}</span>
+              <label className="librarySelectRow">
+                <input
+                  type="checkbox"
+                  checked={selectedLibraryIds.includes(video.id)}
+                  disabled={!usableVideo}
+                  onChange={(event) => toggleLibrarySelection(video, event.target.checked)}
+                />
+                <span>Join</span>
+              </label>
+              <button className="libraryLoadButton" type="button" onClick={() => loadPreviousSession(video)}>
+                {sourceIsVideo ? <video src={sourceUrl} muted playsInline /> : sourceIsImage ? <img src={sourceUrl} alt="" /> : (
+                  <span className="libraryPlaceholder">
+                    <Database size={24} />
+                  </span>
+                )}
+                <span className="libraryCardBody">
+                  <strong>{video.title}</strong>
+                  <span>{video.mode.replaceAll("_", " ")}</span>
+                  <small className={`statusBadge status-${libraryStatus.toLowerCase()}`}>{libraryStatus}</small>
+                </span>
+              </button>
+              <div className="libraryTranslateRow">
+                <select
+                  value={language}
+                  disabled={!usableVideo || busy}
+                  onChange={(event) => setLibraryLanguages((current) => ({ ...current, [video.id]: event.target.value }))}
+                  aria-label={`Retranslate ${video.title} language`}
+                >
+                  {LANGUAGE_OPTIONS.map((option) => (
+                    <option key={option.code} value={option.code}>{option.label}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => startRetranslation(video)}
+                  disabled={!usableVideo || busy || libraryActionBusy === `retranslate:${video.id}`}
+                >
+                  {libraryActionBusy === `retranslate:${video.id}` ? <Loader2 className="spin" size={15} /> : <Languages size={15} />}
+                  Retranslate
+                </button>
               </div>
               <div className="libraryActions">
-                <a href={video.sourceUrl} target="_blank" rel="noreferrer">Open</a>
+                {sourceUrl ? (
+                  <>
+                    <a href={sourceUrl} target="_blank" rel="noreferrer">Open</a>
+                    <a href={sourceUrl} download target="_blank" rel="noreferrer">
+                      <Download size={14} />
+                      Download
+                    </a>
+                  </>
+                ) : <button onClick={() => loadPreviousSession(video)}>Load</button>}
                 <button onClick={() => removeVideo(video.id)} aria-label="Delete saved video">
                   <Trash2 size={15} />
                 </button>
               </div>
             </article>
-          ))}
+          );
+          })}
+            </>
+          )}
         </div>
       </aside>
       </div>

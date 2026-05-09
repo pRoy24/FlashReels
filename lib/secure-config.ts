@@ -236,6 +236,10 @@ export function getAdapterBaseUrl(request: Request) {
   return getConfiguredPublicBaseUrl() || trimTrailingSlash(getRequestOrigin(request));
 }
 
+export function shouldUseCustomAdapters() {
+  return process.env.FLASHREELS_ENABLE_CUSTOM_ADAPTERS === "true";
+}
+
 export function getSamsarSdkBaseUrl() {
   const root = trimTrailingSlash(process.env.SAMSAR_API_BASE_URL || "https://api.samsar.one");
   return root.endsWith("/v1") ? root : `${root}/v1`;
