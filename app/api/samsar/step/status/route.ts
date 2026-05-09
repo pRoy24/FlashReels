@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 
+import { requireSessionUser } from "@/lib/auth";
 import { jsonError } from "@/lib/http";
 import { getSamsarStepStatus } from "@/lib/samsar";
 
 export async function GET(request: Request) {
   try {
+    await requireSessionUser(request);
     const url = new URL(request.url);
     const requestId = url.searchParams.get("request_id") || url.searchParams.get("session_id") || "";
     const response = await getSamsarStepStatus(request, requestId);

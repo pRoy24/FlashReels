@@ -4,7 +4,7 @@
 | --- |
 | **A minimal, step-controlled reel production desk for marketing teams and video editors.** |
 
-FlashReels is a Next.js workspace for prompt-led and image-led video generation. It is built around RunwayML generation so teams can compose a request, preview each completed stage, and keep a lightweight private library of finished outputs.
+FlashReels is a Next.js workspace for image-list-to-video generation. It is built around RunwayML generation so teams can compose a request, preview each completed stage, and keep a lightweight private library of finished outputs.
 
 RunwayML is the primary creative generation provider for image and video assets. FlashReels uses it for text-to-image, image-to-video, task polling, and normalized output URLs. Defaults are `gen4_image` for images and `gen4.5` for image-to-video.
 
@@ -14,7 +14,7 @@ RunwayML is the primary creative generation provider for image and video assets.
 
 Prompts, reference images, generated frames, and generated videos move through the available APIs:
 
-- `POST /api/samsar/step/start` creates a step-video request for `text_to_video` or `image_list_to_video`.
+- `POST /api/samsar/step/start` creates a step-video request for `image_list_to_video`.
 - `GET /api/samsar/step/status-detailed` returns render status plus stage resources for preview.
 - `POST /api/samsar/step/process-next` advances the active request after review.
 - `POST /api/runway/text-to-image` submits authenticated RunwayML text-to-image work.
@@ -31,7 +31,7 @@ npm run dev -- --local
 
 Local development requires `--local`. The dev script opens a temporary public callback tunnel and passes that URL to the app as `FLASHREELS_PUBLIC_BASE_URL`; without it, Samsar cannot reach the custom Runway adapter endpoints running on your machine.
 
-Configure keys and the server secret in the startup wizard or through environment variables:
+Register or sign in, then configure keys and the server secret in the authenticated startup wizard or through environment variables:
 
 - `FLASHREELS_RUNWAYML_API_KEY`
 - `FLASHREELS_SAMSAR_API_KEY`
@@ -39,7 +39,19 @@ Configure keys and the server secret in the startup wizard or through environmen
 
 The server secret must be at least 24 characters, contain no whitespace, and include at least three character classes across lowercase, uppercase, numbers, and symbols. FlashReels sends this secret to Samsar as the custom adapter API key and validates it on every adapter request before calling RunwayML.
 
-Optional defaults are documented in `.env.example`, including base URLs, Runway model names, the public callback base URL, and Vercel Redis / Upstash persistence variables.
+In local development, wizard saves are written to the encrypted `.flashreels` store and mirrored into `.env.local` for future dev-server restarts. Set `FLASHREELS_ENV_FILE` to another project-local `.env*` file name if needed, or set `FLASHREELS_WRITE_ENV_FILE=0` to disable env-file writes.
+
+On Vercel, runtime code cannot persist changes to deployment env files. Configure Vercel KV or Upstash Redis with `KV_REST_API_URL` / `KV_REST_API_TOKEN` or `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`; the authenticated wizard will then save encrypted secrets to Redis. Also set a stable `FLASHREELS_SECRET` or `FLASHREELS_AUTH_SECRET` in the Vercel project so encrypted Redis values remain decryptable across deployments.
+
+Optional defaults are documented in `.env.example`, including base URLs, Runway model names, the public callback base URL, env-file controls, and Vercel Redis / Upstash persistence variables.
+
+## Creator Modes
+
+The `/app` creator now exposes three editing surfaces:
+
+- `Simple` for prompt, image URLs, aspect ratio, duration, subtitles, outro URL, footer URL, footer toggle, and avatar toggle.
+- `Advanced` for the same workflow plus image model, video model, custom image-to-video model, avatar model, CTA copy, and metadata.
+- `JSON` for loose object-literal editing with validation, preview, and support for unquoted keys or trailing commas.
 
 ## API Keys
 
@@ -48,19 +60,19 @@ RunwayML:
 1. Sign in to RunwayML.
 2. Open the developer or API settings area.
 3. Create an API key.
-4. Add it in the FlashReels startup wizard or set `FLASHREELS_RUNWAYML_API_KEY`.
+4. Add it in the authenticated FlashReels startup wizard or set `FLASHREELS_RUNWAYML_API_KEY`.
 
 Samsar:
 
 1. Sign in to Samsar.
 2. Open the API key settings for your account.
 3. Create an API key.
-4. Add it in the FlashReels startup wizard or set `FLASHREELS_SAMSAR_API_KEY`.
+4. Add it in the authenticated FlashReels startup wizard or set `FLASHREELS_SAMSAR_API_KEY`.
 
 Server secret:
 
 1. Generate a unique secret for this FlashReels instance.
-2. Add it in the startup wizard or set `FLASHREELS_SERVER_SECRET`.
+2. Add it in the authenticated startup wizard or set `FLASHREELS_SERVER_SECRET`.
 3. Rotate it if a local tunnel URL or deployment is shared outside your team.
 
 ## Credits

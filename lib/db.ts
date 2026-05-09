@@ -4,7 +4,7 @@ import { readPersistentJson, writePersistentJson } from "@/lib/persistent-store"
 const DB_KEY = "flashreels:db:v1";
 const DB_FILE = "db.json";
 
-export type FlashReelsMode = "text_to_video" | "image_list_to_video";
+export type FlashReelsMode = "image_list_to_video";
 
 export interface FlashReelsUser {
   id: string;

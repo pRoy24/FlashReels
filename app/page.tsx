@@ -36,15 +36,15 @@ export default function LandingPage() {
             <p className="eyebrow">Generative video editor</p>
             <h1 id="hero-title">FlashReels</h1>
             <p>
-              Placeholder product copy for a fast, step-controlled video creation workspace powered by RunwayML generation.
-              We will update this messaging shortly.
+              A focused, step-controlled image-list-to-video workspace powered by RunwayML generation.
+              The editor is tuned for fast iteration, structured outro setup, and render review.
             </p>
             <div className="heroActions">
               <Link className="primaryAction" href="/app">
                 <Play size={17} />
                 Enter App
               </Link>
-              <span className="subtleNote">Text to video and image list to video</span>
+              <span className="subtleNote">Image list to video only</span>
             </div>
           </div>
 

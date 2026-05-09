@@ -23,7 +23,7 @@ export async function POST(request: Request) {
     const payload = await readJson<Record<string, unknown>>(request);
     const sourceUrl = normalizeString(payload.sourceUrl || payload.source_url || payload.videoUrl || payload.video_url);
     const prompt = normalizeString(payload.prompt);
-    const mode = payload.mode === "image_list_to_video" ? "image_list_to_video" : "text_to_video";
+    const mode = "image_list_to_video" as FlashReelsMode;
     if (!sourceUrl) {
       throw apiError("sourceUrl is required.");
     }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import {
   ArrowRight,
   Check,
@@ -8,20 +8,20 @@ import {
   Database,
   Film,
   Image as ImageIcon,
-  ImagePlus,
   KeyRound,
   Loader2,
   LogOut,
   Music,
+  Pause,
   Play,
   RefreshCcw,
   Save,
   Trash2,
   Volume2,
-  Wand2,
 } from "lucide-react";
 
-type Mode = "text_to_video" | "image_list_to_video";
+import { CreatorWizard } from "@/components/CreatorWizard";
+
 type ApiRecord = Record<string, unknown>;
 
 interface User {
@@ -42,25 +42,30 @@ interface SetupStatus {
   persistence?: {
     provider: string;
     persistent: boolean;
+    remoteSafe?: boolean;
+    reason?: string;
     redisEnv?: {
       url?: string;
       token?: string;
     };
+  };
+  envFile?: {
+    target: string;
+    writable: boolean;
+    reason?: string;
   };
 }
 
 interface LibraryVideo {
   id: string;
   title: string;
-  mode: Mode;
+  mode: string;
   prompt: string;
   sourceUrl: string;
   status: string;
   createdAt: string;
 }
 
-const TEXT_PROMPT = "A precise cinematic launch reel for a new product, built with clean motion, premium lighting, and confident pacing.";
-const IMAGE_PROMPT = "Create a cohesive video from these images with smooth movement, editorial pacing, and consistent visual tone.";
 const STAGE_ORDER = [
   "prompt_generation",
   "image_generation",
@@ -69,6 +74,7 @@ const STAGE_ORDER = [
   "ai_video_generation",
   "lip_sync_generation",
   "sound_effect_generation",
+  "narrator_avatar_generation",
   "video_generation",
 ];
 
@@ -163,13 +169,6 @@ function getFinalVideoUrl(status: ApiRecord | null) {
     status.video_url,
     status.videoLink,
   );
-}
-
-function parseImageUrls(value: string) {
-  return value
-    .split(/\n|,/)
-    .map((url) => url.trim())
-    .filter(Boolean);
 }
 
 function collectMediaUrls(value: unknown, result = new Set<string>()) {
@@ -437,6 +436,8 @@ function SetupWizard({
     }
   }
 
+  const secretStorage = getSecretStorageStatus(setup);
+
   return (
     <section className="setupSurface">
       <div className="setupPanel">
@@ -452,6 +453,7 @@ function SetupWizard({
           <StatusPill ready={Boolean(setup?.runwayConfigured)} label="RunwayML API key" source={setup?.runwaySource} />
           <StatusPill ready={Boolean(setup?.samsarConfigured)} label="Samsar API key" source={setup?.samsarSource} />
           <StatusPill ready={Boolean(setup?.serverSecretConfigured)} label="Server secret" source={setup?.serverSecretSource} />
+          <StatusPill ready={secretStorage.ready} label="Secret storage" source={secretStorage.source} />
           <StatusPill
             ready={Boolean(setup?.publicBaseUrl)}
             label={setup?.publicBaseUrl ? "Public callbacks" : "Instance callbacks"}
@@ -506,6 +508,25 @@ function StatusPill({ ready, label, source }: { ready: boolean; label: string; s
       {source ? <small>{source}</small> : null}
     </div>
   );
+}
+
+function getSecretStorageStatus(setup: SetupStatus | null) {
+  if (!setup) {
+    return { ready: false, source: "" };
+  }
+  if (setup.persistence?.remoteSafe) {
+    return { ready: true, source: setup.persistence.provider };
+  }
+  if (setup.envFile?.writable) {
+    return { ready: true, source: `${setup.envFile.target} + local store` };
+  }
+  if (setup.persistence?.persistent) {
+    return { ready: true, source: setup.persistence.provider };
+  }
+  return {
+    ready: false,
+    source: setup.persistence?.reason || setup.envFile?.reason || setup.persistence?.provider || "",
+  };
 }
 
 function AuthGate({ onAuth }: { onAuth: (user: User) => void }) {
@@ -612,25 +633,89 @@ function ResourceIcon({ kind }: { kind: StagePreviewResource["kind"] }) {
   return <Film size={15} />;
 }
 
+function buildTimelineRows(resources: StagePreviewResource[]) {
+  const orderedResources = [...resources].sort((a, b) => (
+    a.startTime - b.startTime ||
+    a.endTime - b.endTime ||
+    a.label.localeCompare(b.label)
+  ));
+  const rows: StagePreviewResource[][] = [];
+
+  orderedResources.forEach((resource) => {
+    const row = rows.find((candidate) => candidate.every((existing) => (
+      resource.endTime <= existing.startTime || resource.startTime >= existing.endTime
+    )));
+    if (row) {
+      row.push(resource);
+    } else {
+      rows.push([resource]);
+    }
+  });
+
+  return rows;
+}
+
 function StagedVideoPreview({
   resource,
   timelineSeek,
+  isSequencePlaying,
+  playbackRequestId,
+  mediaRef,
+  onEnded,
+  onPlay,
+  onPause,
 }: {
   resource: StagePreviewResource;
   timelineSeek: number;
+  isSequencePlaying: boolean;
+  playbackRequestId: number;
+  mediaRef: MutableRefObject<HTMLMediaElement | null>;
+  onEnded: () => void;
+  onPlay: () => void;
+  onPause: () => void;
 }) {
-  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const localMediaRef = useRef<HTMLMediaElement | null>(null);
 
   useEffect(() => {
-    const video = videoRef.current;
-    if (!video || resource.kind !== "video") {
+    const media = localMediaRef.current;
+    if (!media || (resource.kind !== "video" && resource.kind !== "audio")) {
       return;
     }
     const nextTime = Math.max(0, timelineSeek - resource.startTime);
-    if (Number.isFinite(nextTime) && Math.abs(video.currentTime - nextTime) > 0.5) {
-      video.currentTime = nextTime;
+    if (Number.isFinite(nextTime) && Math.abs(media.currentTime - nextTime) > 0.5) {
+      media.currentTime = nextTime;
     }
   }, [resource, timelineSeek]);
+
+  useEffect(() => {
+    const media = localMediaRef.current;
+    if (!media || (resource.kind !== "video" && resource.kind !== "audio")) {
+      return;
+    }
+    if (!isSequencePlaying) {
+      return;
+    }
+    media.play().catch(() => {
+      onPause();
+    });
+  }, [isSequencePlaying, onPause, playbackRequestId, resource]);
+
+  function setMediaElement(element: HTMLMediaElement | null) {
+    localMediaRef.current = element;
+    mediaRef.current = element;
+  }
+
+  function syncInitialSeek(element: HTMLMediaElement | null) {
+    if (element) {
+      element.currentTime = Math.max(0, timelineSeek - resource.startTime);
+    }
+  }
+
+  function handlePause() {
+    if (!localMediaRef.current?.ended) {
+      onPause();
+    }
+  }
 
   if (resource.kind === "image") {
     return <img src={resource.url} alt="" />;
@@ -642,7 +727,16 @@ function StagedVideoPreview({
         <Music size={42} />
         <strong>{resource.label}</strong>
         <span>{formatTime(resource.startTime)} - {formatTime(resource.endTime)}</span>
-        <audio src={resource.url} controls />
+        <audio
+          key={resource.url}
+          ref={setMediaElement}
+          src={resource.url}
+          controls
+          onLoadedMetadata={(event) => syncInitialSeek(event.currentTarget)}
+          onEnded={onEnded}
+          onPlay={onPlay}
+          onPause={handlePause}
+        />
       </div>
     );
   }
@@ -650,16 +744,14 @@ function StagedVideoPreview({
   return (
     <video
       key={resource.url}
-      ref={videoRef}
+      ref={setMediaElement}
       src={resource.url}
       controls
       playsInline
-      onLoadedMetadata={() => {
-        const video = videoRef.current;
-        if (video) {
-          video.currentTime = Math.max(0, timelineSeek - resource.startTime);
-        }
-      }}
+      onLoadedMetadata={(event) => syncInitialSeek(event.currentTarget)}
+      onEnded={onEnded}
+      onPlay={onPlay}
+      onPause={handlePause}
     />
   );
 }
@@ -680,6 +772,9 @@ function StagedPreviewPanel({
   onSelectResource: (resource: StagePreviewResource) => void;
 }) {
   const session = getDetailedSession(status);
+  const sequenceMediaRef = useRef<HTMLMediaElement | null>(null);
+  const [isSequencePlaying, setIsSequencePlaying] = useState(false);
+  const [playbackRequestId, setPlaybackRequestId] = useState(0);
   const currentStage = firstString(session.currentStage, getRecord(status?.step).current_step, status?.current_step);
   const previewStage = firstString(session.previewStage);
   const completedStages = Array.isArray(session.completedStages) ? session.completedStages.map((stage) => getString(stage)).filter(Boolean) : [];
@@ -690,6 +785,58 @@ function StagedPreviewPanel({
   );
   const completedCount = STAGE_ORDER.filter((stage) => completedStages.includes(stage) || resources.some((resource) => resource.stage === stage)).length;
   const progressPercent = Math.min(100, Math.max(4, (completedCount / STAGE_ORDER.length) * 100));
+  const playableResources = useMemo(() => resources
+    .filter((resource) => resource.kind === "audio" || resource.kind === "video")
+    .sort((a, b) => a.startTime - b.startTime || a.endTime - b.endTime || a.label.localeCompare(b.label)), [resources]);
+  const timelineRows = useMemo(() => buildTimelineRows(resources), [resources]);
+
+  function selectResource(resource: StagePreviewResource) {
+    sequenceMediaRef.current?.pause();
+    setIsSequencePlaying(false);
+    onSelectResource(resource);
+    onTimelineSeek(resource.startTime);
+  }
+
+  function startPlayback(resource: StagePreviewResource, seekTime = resource.startTime) {
+    onSelectResource(resource);
+    onTimelineSeek(seekTime);
+    setIsSequencePlaying(true);
+    setPlaybackRequestId((value) => value + 1);
+  }
+
+  function toggleSequencePlayback() {
+    if (isSequencePlaying) {
+      sequenceMediaRef.current?.pause();
+      setIsSequencePlaying(false);
+      return;
+    }
+
+    const selectedPlayable = selectedResource && playableResources.find((resource) => resource.id === selectedResource.id);
+    const timelinePlayable = playableResources.find((resource) => timelineSeek >= resource.startTime && timelineSeek < resource.endTime);
+    const nextPlayable = playableResources.find((resource) => resource.endTime > timelineSeek);
+    const resourceToPlay = selectedPlayable || timelinePlayable || nextPlayable || playableResources[0];
+    if (!resourceToPlay) {
+      return;
+    }
+    const seekTime = timelineSeek >= resourceToPlay.startTime && timelineSeek < resourceToPlay.endTime
+      ? timelineSeek
+      : resourceToPlay.startTime;
+    startPlayback(resourceToPlay, seekTime);
+  }
+
+  function handleResourceEnded() {
+    if (!selectedResource) {
+      setIsSequencePlaying(false);
+      return;
+    }
+    const currentIndex = playableResources.findIndex((resource) => resource.id === selectedResource.id);
+    const nextResource = currentIndex >= 0 ? playableResources[currentIndex + 1] : null;
+    if (!nextResource) {
+      setIsSequencePlaying(false);
+      return;
+    }
+    startPlayback(nextResource);
+  }
 
   return (
     <>
@@ -705,7 +852,16 @@ function StagedPreviewPanel({
 
       <div className="renderViewport">
         {selectedResource ? (
-          <StagedVideoPreview resource={selectedResource} timelineSeek={timelineSeek} />
+          <StagedVideoPreview
+            resource={selectedResource}
+            timelineSeek={timelineSeek}
+            isSequencePlaying={isSequencePlaying}
+            playbackRequestId={playbackRequestId}
+            mediaRef={sequenceMediaRef}
+            onEnded={handleResourceEnded}
+            onPlay={() => setIsSequencePlaying(true)}
+            onPause={() => setIsSequencePlaying(false)}
+          />
         ) : (
           <div className="emptyPreview">
             <Film size={30} />
@@ -715,37 +871,76 @@ function StagedPreviewPanel({
       </div>
 
       <div className="timelinePreview">
-        <div className="timelineLabels">
-          <span>{formatTime(timelineSeek)}</span>
-          <strong>{formatTime(timelineDuration)}</strong>
-        </div>
-        <input
-          type="range"
-          min={0}
-          max={timelineDuration}
-          step={0.1}
-          value={Math.min(timelineDuration, timelineSeek)}
-          onChange={(event) => onTimelineSeek(Number(event.target.value))}
-          aria-label="Seek preview timeline"
-        />
-        <div className="timelineMarkers">
-          {resources.map((resource) => (
-            <button
-              key={resource.id}
-              type="button"
-              title={resource.label}
-              style={{
-                left: `${Math.min(100, Math.max(0, (resource.startTime / timelineDuration) * 100))}%`,
-                width: `${Math.max(2, ((resource.endTime - resource.startTime) / timelineDuration) * 100)}%`,
+        <div className="timelineControls">
+          <button
+            type="button"
+            className="timelinePlayButton"
+            onClick={toggleSequencePlayback}
+            disabled={playableResources.length === 0}
+            aria-label={isSequencePlaying ? "Pause preview timeline" : "Play preview timeline"}
+          >
+            {isSequencePlaying ? <Pause size={16} /> : <Play size={16} />}
+          </button>
+          <div className="timelineRangeWrap">
+            <div className="timelineLabels">
+              <span>{formatTime(timelineSeek)}</span>
+              <strong>{formatTime(timelineDuration)}</strong>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={timelineDuration}
+              step={0.1}
+              value={Math.min(timelineDuration, timelineSeek)}
+              onChange={(event) => {
+                setIsSequencePlaying(false);
+                sequenceMediaRef.current?.pause();
+                onTimelineSeek(Number(event.target.value));
               }}
-              onClick={() => {
-                onSelectResource(resource);
-                onTimelineSeek(resource.startTime);
-              }}
+              aria-label="Seek preview timeline"
             />
-          ))}
+          </div>
+        </div>
+        <div className="timelineTracks" aria-label="Timeline resources">
+          {timelineRows.length > 0 ? timelineRows.map((row, rowIndex) => (
+            <div className="timelineTrack" key={`timeline-row-${rowIndex}`}>
+              {row.map((resource) => (
+                <button
+                  key={resource.id}
+                  type="button"
+                  className={`timelineSegment ${selectedResource?.id === resource.id ? "active" : ""} kind-${resource.kind}`}
+                  title={`${resource.label} ${formatTime(resource.startTime)}-${formatTime(resource.endTime)}`}
+                  style={{
+                    left: `${Math.min(100, Math.max(0, (resource.startTime / timelineDuration) * 100))}%`,
+                    width: `${Math.max(3, ((resource.endTime - resource.startTime) / timelineDuration) * 100)}%`,
+                  }}
+                  onClick={() => selectResource(resource)}
+                >
+                  <ResourceIcon kind={resource.kind} />
+                  <span>{resource.label}</span>
+                </button>
+              ))}
+            </div>
+          )) : (
+            <div className="placeholderBlock">Timeline resources will appear as completed assets become available.</div>
+          )}
         </div>
       </div>
+
+      {selectedResource ? (
+        <div className="resourceDetailPanel">
+          <div className="resourceDetailHeader">
+            <span>
+              <ResourceIcon kind={selectedResource.kind} />
+              {selectedResource.label}
+            </span>
+            <strong>{formatTime(selectedResource.startTime)}-{formatTime(selectedResource.endTime)}</strong>
+          </div>
+          <p>{formatStageLabel(selectedResource.stage)} - {selectedResource.status}</p>
+          {selectedResource.prompt ? <small>{selectedResource.prompt}</small> : null}
+          <a href={selectedResource.url} target="_blank" rel="noreferrer">Open resource</a>
+        </div>
+      ) : null}
 
       <div className="resourceShelf" aria-label="Completed stage resources">
         {resources.length > 0 ? resources.map((resource) => (
@@ -754,8 +949,7 @@ function StagedPreviewPanel({
             type="button"
             className={`resourceTile ${selectedResource?.id === resource.id ? "active" : ""}`}
             onClick={() => {
-              onSelectResource(resource);
-              onTimelineSeek(resource.startTime);
+              selectResource(resource);
             }}
           >
             <span className="resourceThumb">
@@ -773,20 +967,6 @@ function StagedPreviewPanel({
           <div className="placeholderBlock">Completed image, video, speech, and music previews will appear here as each stage finishes.</div>
         )}
       </div>
-
-      {resources.some((resource) => resource.kind === "audio") ? (
-        <div className="audioShelf">
-          {resources.filter((resource) => resource.kind === "audio").map((resource) => (
-            <div className="audioTrack" key={`audio-${resource.id}`}>
-              <div>
-                <strong>{resource.label}</strong>
-                <span>{formatStageLabel(resource.stage)} - {formatTime(resource.startTime)}-{formatTime(resource.endTime)}</span>
-              </div>
-              <audio src={resource.url} controls />
-            </div>
-          ))}
-        </div>
-      ) : null}
     </>
   );
 }
@@ -795,12 +975,7 @@ export default function FlashReelsApp() {
   const [setup, setSetup] = useState<SetupStatus | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [booting, setBooting] = useState(true);
-  const [mode, setMode] = useState<Mode>("text_to_video");
-  const [prompt, setPrompt] = useState(TEXT_PROMPT);
-  const [imageUrls, setImageUrls] = useState("");
-  const [aspectRatio, setAspectRatio] = useState<"16:9" | "9:16">("16:9");
-  const [duration, setDuration] = useState(10);
-  const [enableSubtitles, setEnableSubtitles] = useState(true);
+  const [lastSubmission, setLastSubmission] = useState<Record<string, unknown> | null>(null);
   const [requestId, setRequestId] = useState("");
   const [status, setStatus] = useState<ApiRecord | null>(null);
   const [error, setError] = useState("");
@@ -811,14 +986,14 @@ export default function FlashReelsApp() {
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [selectedResourceId, setSelectedResourceId] = useState("");
   const [timelineSeek, setTimelineSeek] = useState(0);
-
-  const parsedImageUrls = useMemo(() => parseImageUrls(imageUrls), [imageUrls]);
   const statusText = getStatusText(status);
   const finalVideoUrl = getFinalVideoUrl(status);
   const step = getRecord(status?.step);
   const waitingForNext = Boolean(step.waiting_for_process_next || status?.waiting_for_process_next);
   const nextStep = firstString(step.next_step, status?.next_step);
   const currentStep = firstString(step.current_step, status?.current_step);
+  const currentStepLabel = currentStep ? formatStageLabel(currentStep) : "";
+  const nextStepLabel = nextStep ? formatStageLabel(nextStep) : "";
   const terminal = ["FAILED", "CANCELED", "CANCELLED"].includes(statusText.toUpperCase());
   const canContinue = statusText.toUpperCase() === "COMPLETED" && waitingForNext && Boolean(nextStep);
   const completedBlocks = useMemo(() => {
@@ -863,21 +1038,28 @@ export default function FlashReelsApp() {
     }
   }, [requestId]);
 
+  const loadSetup = useCallback(async () => {
+    const setupData = await readApi<SetupStatus>("/api/setup");
+    setSetup(setupData);
+    return setupData;
+  }, []);
+
   useEffect(() => {
     async function boot() {
       try {
-        const [setupData, authData] = await Promise.all([
-          readApi<SetupStatus>("/api/setup"),
-          readApi<{ user: User | null }>("/api/auth/me"),
-        ]);
-        setSetup(setupData);
+        const authData = await readApi<{ user: User | null }>("/api/auth/me");
         setUser(authData.user);
+        if (authData.user) {
+          await loadSetup();
+        }
+      } catch (bootError) {
+        setError(bootError instanceof Error ? bootError.message : "Unable to load FlashReels.");
       } finally {
         setBooting(false);
       }
     }
     boot();
-  }, []);
+  }, [loadSetup]);
 
   useEffect(() => {
     if (user) {
@@ -909,20 +1091,10 @@ export default function FlashReelsApp() {
     }
   }, [previewResources, selectedResourceId]);
 
-  function switchMode(nextMode: Mode) {
-    setMode(nextMode);
-    setPrompt(nextMode === "text_to_video" ? TEXT_PROMPT : IMAGE_PROMPT);
-    setStatus(null);
-    setRequestId("");
-    setSavedUrl("");
-    setSelectedResourceId("");
-    setTimelineSeek(0);
-    setError("");
-  }
-
-  async function startRender() {
+  async function startRender(payload: Record<string, unknown>) {
     setBusy(true);
     setError("");
+    setLastSubmission(payload);
     setStatus(null);
     setRequestId("");
     setSavedUrl("");
@@ -931,14 +1103,7 @@ export default function FlashReelsApp() {
     try {
       const data = await readApi<ApiRecord>("/api/samsar/step/start", {
         method: "POST",
-        body: JSON.stringify({
-          mode,
-          prompt,
-          imageUrls: parsedImageUrls,
-          aspectRatio,
-          duration,
-          enableSubtitles,
-        }),
+        body: JSON.stringify(payload),
       });
       const nextRequestId = getRequestId(data);
       if (!nextRequestId) {
@@ -982,12 +1147,13 @@ export default function FlashReelsApp() {
     setBusy(true);
     setError("");
     try {
+      const title = firstString(lastSubmission?.prompt, "Untitled render");
       await readApi<{ video: LibraryVideo }>("/api/library", {
         method: "POST",
         body: JSON.stringify({
-          title: prompt.slice(0, 72),
-          mode,
-          prompt,
+          title: title.slice(0, 72),
+          mode: "image_list_to_video",
+          prompt: title,
           sourceUrl: finalVideoUrl,
           samsarRequestId: requestId,
           samsarSessionId: getRequestId(status),
@@ -1012,7 +1178,18 @@ export default function FlashReelsApp() {
   async function logout() {
     await readApi("/api/auth/logout", { method: "POST" });
     setUser(null);
+    setSetup(null);
     setLibrary([]);
+  }
+
+  async function handleAuth(nextUser: User) {
+    setUser(nextUser);
+    setError("");
+    try {
+      await loadSetup();
+    } catch (setupError) {
+      setError(setupError instanceof Error ? setupError.message : "Unable to load setup.");
+    }
   }
 
   if (booting) {
@@ -1023,12 +1200,12 @@ export default function FlashReelsApp() {
     );
   }
 
-  if (!setup?.ready) {
-    return <SetupWizard setup={setup} onUpdated={setSetup} />;
+  if (!user) {
+    return <AuthGate onAuth={handleAuth} />;
   }
 
-  if (!user) {
-    return <AuthGate onAuth={setUser} />;
+  if (!setup?.ready) {
+    return <SetupWizard setup={setup} onUpdated={setSetup} />;
   }
 
   return (
@@ -1038,19 +1215,8 @@ export default function FlashReelsApp() {
           <Film size={20} />
           <div>
             <strong>FlashReels</strong>
-            <span>Step video studio</span>
+            <span>Product reel generator</span>
           </div>
-        </div>
-
-        <div className="modePill" aria-label="Generation mode">
-          <button className={mode === "text_to_video" ? "active" : ""} onClick={() => switchMode("text_to_video")}>
-            <Wand2 size={15} />
-            Text to video
-          </button>
-          <button className={mode === "image_list_to_video" ? "active" : ""} onClick={() => switchMode("image_list_to_video")}>
-            <ImagePlus size={15} />
-            Image list to video
-          </button>
         </div>
 
         <div className="topbarActions">
@@ -1072,66 +1238,15 @@ export default function FlashReelsApp() {
         <section className="studio">
           <header className="studioTopbar">
             <div>
-              <p className="eyebrow">Step video route</p>
-              <h1>{mode === "text_to_video" ? "Text to video" : "Image list to video"}</h1>
+              <h1>Add product images, a CTA URL, and generate a video</h1>
             </div>
           </header>
 
           <div className="studioGrid">
-            <section className="controlPanel">
-              <label>
-                <span>Prompt</span>
-                <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={7} />
-              </label>
-
-              {mode === "image_list_to_video" ? (
-                <label>
-                  <span>Image URLs</span>
-                  <textarea
-                    value={imageUrls}
-                    onChange={(event) => setImageUrls(event.target.value)}
-                    rows={7}
-                    placeholder="https://example.com/shot-01.jpg&#10;https://example.com/shot-02.jpg"
-                  />
-                </label>
-              ) : null}
-
-              <div className="fieldGrid">
-                <label>
-                  <span>Aspect</span>
-                  <select value={aspectRatio} onChange={(event) => setAspectRatio(event.target.value as "16:9" | "9:16")}>
-                    <option value="16:9">16:9</option>
-                    <option value="9:16">9:16</option>
-                  </select>
-                </label>
-                <label>
-                  <span>Duration</span>
-                  <input
-                    type="number"
-                    min={5}
-                    max={60}
-                    value={duration}
-                    onChange={(event) => setDuration(Number(event.target.value))}
-                  />
-                </label>
-              </div>
-
-              <label className="checkRow">
-                <input type="checkbox" checked={enableSubtitles} onChange={(event) => setEnableSubtitles(event.target.checked)} />
-                <span>Subtitles</span>
-              </label>
-
+            <div className="creatorColumn">
+              <CreatorWizard busy={busy} onSubmit={startRender} />
               {error ? <div className="errorBox">{error}</div> : null}
-
-              <button
-                className="primaryButton"
-                onClick={startRender}
-                disabled={busy || !prompt || (mode === "image_list_to_video" && parsedImageUrls.length === 0)}
-              >
-                {busy ? <Loader2 className="spin" size={17} /> : <Play size={17} />}
-                Start step render
-              </button>
-            </section>
+            </div>
 
             <section className="previewPanel">
               <div className="previewHeader">
@@ -1155,9 +1270,15 @@ export default function FlashReelsApp() {
               />
 
               <div className="actionRow">
-                <button className="secondaryButton" onClick={processNext} disabled={!canContinue || busy}>
+                <div className={`approvalPanel ${canContinue ? "ready" : ""}`}>
+                  <div>
+                    <span>{canContinue ? `${currentStepLabel} ready for review` : "Approval checkpoint"}</span>
+                    <strong>{canContinue ? `Approve ${nextStepLabel}` : "Waiting for the current stage"}</strong>
+                  </div>
+                </div>
+                <button className="primaryButton" onClick={processNext} disabled={!canContinue || busy}>
                   {busy ? <Loader2 className="spin" size={16} /> : <ArrowRight size={16} />}
-                  Continue to next step
+                  {canContinue ? `Approve and start ${nextStepLabel}` : "Approve next stage"}
                 </button>
                 <button className="secondaryButton" onClick={saveFinalVideo} disabled={!finalVideoUrl || savedUrl === finalVideoUrl || busy}>
                   <Save size={16} />

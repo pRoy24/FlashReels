@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import os from "node:os";
 
+import { getLocalEnvFileStatus, persistLocalEnvFile } from "@/lib/env-file";
 import { apiError, getRequestOrigin, normalizeString, trimTrailingSlash } from "@/lib/http";
 import { getPersistenceStatus, readPersistentJson, writePersistentJson } from "@/lib/persistent-store";
 
@@ -34,6 +35,16 @@ function getEncryptionKey() {
     `${os.hostname()}:${os.userInfo().username}:${process.cwd()}`
   );
   return crypto.createHash("sha256").update(seed).digest();
+}
+
+function hasStableEncryptionSeed() {
+  return Boolean(process.env.FLASHREELS_SECRET || process.env.FLASHREELS_AUTH_SECRET);
+}
+
+function requireStableRemoteEncryptionSeed() {
+  if (process.env.VERCEL === "1" && !hasStableEncryptionSeed()) {
+    throw apiError("Set FLASHREELS_SECRET or FLASHREELS_AUTH_SECRET in Vercel before saving setup secrets.", 412);
+  }
 }
 
 function encrypt(value: string): EncryptedSecret {
@@ -143,6 +154,7 @@ export async function saveRuntimeKeys(payload: Record<string, unknown>) {
   if (serverSecret) {
     validateServerSecret(serverSecret);
   }
+  requireStableRemoteEncryptionSeed();
 
   const store = await readStore();
   store.keys = {
@@ -153,6 +165,7 @@ export async function saveRuntimeKeys(payload: Record<string, unknown>) {
   };
   store.updatedAt = new Date().toISOString();
   await writeStore(store);
+  await persistLocalEnvFile({ samsarApiKey, runwayApiKey, serverSecret });
   return getSetupStatus();
 }
 
@@ -209,6 +222,7 @@ export async function getSetupStatus() {
       serverSecret: envNames("serverSecret"),
     },
     persistence: getPersistenceStatus(),
+    envFile: getLocalEnvFileStatus(),
     publicBaseUrl: getConfiguredPublicBaseUrl(),
     ready: Boolean(keys.samsarApiKey && keys.runwayApiKey && keys.serverSecret),
   };

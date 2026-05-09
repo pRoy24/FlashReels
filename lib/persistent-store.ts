@@ -2,6 +2,8 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { Redis } from "@upstash/redis";
 
+import { apiError } from "@/lib/http";
+
 const DATA_DIR = path.join(process.cwd(), ".flashreels");
 
 let redis: Redis | null | undefined;
@@ -22,6 +24,10 @@ function getRedis() {
   const config = getRedisConfig();
   redis = config ? new Redis(config) : null;
   return redis;
+}
+
+function isVercelDeployment() {
+  return process.env.VERCEL === "1";
 }
 
 async function readLocalJson<T>(fileName: string, fallback: T): Promise<T> {
@@ -48,6 +54,9 @@ export async function readPersistentJson<T>(key: string, fileName: string, fallb
     const value = await client.get<T>(key);
     return value ?? fallback;
   }
+  if (isVercelDeployment()) {
+    return fallback;
+  }
   return readLocalJson(fileName, fallback);
 }
 
@@ -57,14 +66,24 @@ export async function writePersistentJson<T>(key: string, fileName: string, valu
     await client.set(key, value);
     return;
   }
+  if (isVercelDeployment()) {
+    throw apiError("Persistent storage is not configured. Add Vercel KV or Upstash Redis REST variables before saving setup.", 412);
+  }
   await writeLocalJson(fileName, value);
 }
 
 export function getPersistenceStatus() {
   const config = getRedisConfig();
+  const vercel = isVercelDeployment();
   return {
     provider: config ? "vercel-redis" : "local-file",
-    persistent: Boolean(config),
+    persistent: Boolean(config) || !vercel,
+    remoteSafe: Boolean(config),
+    reason: config
+      ? "Secrets and library data are stored in Redis."
+      : vercel
+        ? "Configure Vercel KV or Upstash Redis for durable deployment storage."
+        : "Secrets and library data are stored in the local .flashreels directory.",
     redisEnv: {
       url: process.env.KV_REST_API_URL
         ? "KV_REST_API_URL"
