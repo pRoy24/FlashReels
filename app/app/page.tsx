@@ -16,6 +16,7 @@ import {
   ListVideo,
   Loader2,
   LogOut,
+  MailPlus,
   Music,
   Pause,
   Play,
@@ -34,6 +35,8 @@ interface User {
   id: string;
   email: string;
   displayName: string;
+  role?: "admin" | "user";
+  isAdmin?: boolean;
 }
 
 interface SetupStatus {
@@ -735,6 +738,76 @@ function AuthGate({ onAuth }: { onAuth: (user: User) => void }) {
           Continue
         </button>
       </div>
+    </section>
+  );
+}
+
+function WhitelistPanel({ user }: { user: User }) {
+  const [open, setOpen] = useState(false);
+  const [emails, setEmails] = useState("");
+  const [currentEmails, setCurrentEmails] = useState<string[]>([]);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function loadWhitelist() {
+    const data = await readApi<{ emails: string[] }>("/api/admin/whitelist");
+    setCurrentEmails(data.emails);
+    setEmails(data.emails.join("\n"));
+  }
+
+  async function toggleOpen() {
+    const nextOpen = !open;
+    setOpen(nextOpen);
+    setError("");
+    if (nextOpen && currentEmails.length === 0) {
+      try {
+        await loadWhitelist();
+      } catch (loadError) {
+        setError(loadError instanceof Error ? loadError.message : "Unable to load whitelist.");
+      }
+    }
+  }
+
+  async function save() {
+    setSaving(true);
+    setError("");
+    try {
+      const data = await readApi<{ emails: string[] }>("/api/admin/whitelist", {
+        method: "POST",
+        body: JSON.stringify({ emails }),
+      });
+      setCurrentEmails(data.emails);
+      setEmails(data.emails.join("\n"));
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Unable to save whitelist.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!user.isAdmin && user.role !== "admin") {
+    return null;
+  }
+
+  return (
+    <section className={`whitelistPanel ${open ? "open" : ""}`}>
+      <button className="secondaryButton whitelistToggle" onClick={toggleOpen}>
+        <MailPlus size={17} />
+        Whitelist
+      </button>
+      {open ? (
+        <div className="whitelistEditor">
+          <label>
+            <span>Allowed registration emails</span>
+            <textarea value={emails} onChange={(event) => setEmails(event.target.value)} rows={4} />
+          </label>
+          {error ? <div className="errorBox">{error}</div> : null}
+          <button className="primaryButton" onClick={save} disabled={saving || !emails.trim()}>
+            {saving ? <Loader2 className="spin" size={17} /> : <Check size={17} />}
+            Save whitelist
+          </button>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -1761,6 +1834,7 @@ export default function FlashReelsApp() {
           </button>
         </div>
       </header>
+      <WhitelistPanel user={user} />
 
       <div className={`appBody ${libraryOpen ? "libraryExpanded" : "libraryCollapsed"}`}>
         <section className="studio">

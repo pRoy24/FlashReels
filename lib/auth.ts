@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { NextResponse } from "next/server";
 
 import { apiError, normalizeString } from "@/lib/http";
-import { mutateDb, normalizeEmail, nowIso, publicUser, readDb, type FlashReelsUser } from "@/lib/db";
+import { isAdminEmail, mutateDb, normalizeEmail, nowIso, publicUser, readDb, type FlashReelsUser } from "@/lib/db";
 
 const COOKIE_NAME = "flashreels_session";
 const SESSION_SECONDS = 60 * 60 * 24 * 7;
@@ -63,16 +63,23 @@ export async function registerUser(payload: Record<string, unknown>) {
   }
 
   return mutateDb(async (db) => {
+    const whitelist = new Set(db.whitelistEmails.map(normalizeEmail));
+    if (!whitelist.has(email)) {
+      throw apiError("This email is not whitelisted for FlashReels registration.", 403);
+    }
+
     if (db.users.some((user) => user.email === email)) {
       throw apiError("A user with this email already exists.", 409);
     }
 
+    const role = db.users.length === 0 || isAdminEmail(email) ? "admin" : "user";
     const passwordData = hashPassword(password);
     const createdAt = nowIso();
     const user: FlashReelsUser = {
       id: crypto.randomUUID(),
       email,
       displayName,
+      role,
       passwordHash: passwordData.hash,
       passwordSalt: passwordData.salt,
       passwordIterations: passwordData.iterations,

@@ -140,6 +140,12 @@ button:disabled {
   padding: 0 14px;
 }
 
+.primaryNavButton {
+  border-color: #327d58;
+  background: #1e5b3d;
+  color: #f2fff7;
+}
+
 .primaryAction,
 .primaryButton {
   border-color: #327d58;
@@ -154,6 +160,11 @@ button:disabled {
 .secondaryAction {
   padding: 0 16px;
   background: transparent;
+}
+
+.appAccessAction {
+  border-color: var(--line);
+  color: var(--soft);
 }
 
 .primaryButton,
@@ -572,6 +583,37 @@ textarea:focus {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.whitelistPanel {
+  display: grid;
+  justify-items: end;
+  gap: 10px;
+  padding: 0 18px 12px;
+  border-bottom: 1px solid var(--line);
+  background: #070a0d;
+}
+
+.whitelistToggle {
+  width: auto;
+  min-height: 36px;
+  padding: 0 12px;
+}
+
+.whitelistEditor {
+  display: grid;
+  width: min(520px, 100%);
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0d1217;
+}
+
+.whitelistEditor textarea {
+  width: 100%;
+  min-height: 112px;
+  resize: vertical;
 }
 
 .appBody {

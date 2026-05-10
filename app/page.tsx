@@ -26,12 +26,12 @@ export default function LandingPage() {
             <span>FlashReels</span>
           </div>
           <div className="landingNavActions">
-            <Link className="navButton" href="/feed">
+            <Link className="navButton primaryNavButton" href="/feed">
               Public Feed
+              <ArrowRight size={16} />
             </Link>
             <Link className="navButton" href="/app">
-              Enter App
-              <ArrowRight size={16} />
+              Whitelisted Access
             </Link>
           </div>
         </nav>
@@ -42,18 +42,18 @@ export default function LandingPage() {
             <h1 id="hero-title">FlashReels</h1>
             <p>
               A focused, step-controlled image-list-to-video workspace powered by RunwayML generation.
-              The editor is tuned for fast iteration, structured outro setup, and render review.
+              Watch published reels first, then enter the editor only from a permitted whitelisted address.
             </p>
             <div className="heroActions">
-              <Link className="primaryAction" href="/app">
-                <Play size={17} />
-                Enter App
-              </Link>
-              <Link className="secondaryAction" href="/feed">
+              <Link className="primaryAction heroPrimaryAction" href="/feed">
                 <Film size={17} />
-                View Feed
+                View Public Feed
               </Link>
-              <span className="subtleNote">Image list to video only</span>
+              <Link className="secondaryAction appAccessAction" href="/app">
+                <Play size={17} />
+                App access
+              </Link>
+              <span className="subtleNote">Permitted for whitelisted addresses</span>
             </div>
           </div>
 

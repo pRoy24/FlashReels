@@ -11,6 +11,7 @@ export interface FlashReelsUser {
   id: string;
   email: string;
   displayName: string;
+  role?: "admin" | "user";
   passwordHash: string;
   passwordSalt: string;
   passwordIterations: number;
@@ -43,12 +44,14 @@ export interface FlashReelsDatabase {
   version: 1;
   users: FlashReelsUser[];
   videos: FlashReelsVideo[];
+  whitelistEmails: string[];
 }
 
 const EMPTY_DB: FlashReelsDatabase = {
   version: 1,
   users: [],
   videos: [],
+  whitelistEmails: [],
 };
 
 let writeQueue = Promise.resolve();
@@ -69,10 +72,19 @@ function parseSeededDb(): Partial<FlashReelsDatabase> {
 }
 
 function normalizeDb(parsed: Partial<FlashReelsDatabase>): FlashReelsDatabase {
+  const seededWhitelist = parseEmailList(process.env.FLASHREELS_WHITELIST_EMAILS).concat(
+    parseEmailList(process.env.FLASHREELS_ADMIN_EMAILS),
+  );
+  const whitelistEmails = Array.from(new Set([
+    ...(Array.isArray(parsed.whitelistEmails) ? parsed.whitelistEmails.map(normalizeEmail) : []),
+    ...seededWhitelist,
+  ].filter(Boolean)));
+
   return {
     version: 1,
     users: Array.isArray(parsed.users) ? parsed.users : [],
     videos: Array.isArray(parsed.videos) ? parsed.videos : [],
+    whitelistEmails,
   };
 }
 
@@ -113,10 +125,26 @@ export function publicUser(user: FlashReelsUser) {
     id: user.id,
     email: user.email,
     displayName: user.displayName,
+    role: user.role || "user",
+    isAdmin: isAdminEmail(user.email) || user.role === "admin",
     createdAt: user.createdAt,
   };
 }
 
 export function normalizeEmail(value: unknown) {
   return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+export function parseEmailList(value: unknown) {
+  if (typeof value !== "string") {
+    return [];
+  }
+  return Array.from(new Set(value
+    .split(/[\s,;]+/)
+    .map(normalizeEmail)
+    .filter((email) => email.includes("@"))));
+}
+
+export function isAdminEmail(email: string) {
+  return parseEmailList(process.env.FLASHREELS_ADMIN_EMAILS).includes(normalizeEmail(email));
 }
