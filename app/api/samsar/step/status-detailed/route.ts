@@ -21,6 +21,17 @@ export async function GET(request: Request) {
         throw error;
       }
       response = await getSamsarVideoStatusDetailed(request, requestId);
+      const session = response && typeof response === "object" && "session" in response
+        ? (response as { session?: { routeType?: unknown; route_type?: unknown } }).session
+        : null;
+      const routeType = typeof session?.routeType === "string"
+        ? session.routeType
+        : typeof session?.route_type === "string"
+          ? session.route_type
+          : "";
+      if (routeType === "step") {
+        throw apiError("Samsar step status is unavailable for this step render, so approval state cannot be loaded.", 502);
+      }
     }
     return NextResponse.json(response);
   } catch (error) {

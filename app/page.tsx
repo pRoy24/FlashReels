@@ -31,7 +31,7 @@ export default function LandingPage() {
               <ArrowRight size={16} />
             </Link>
             <Link className="navButton" href="/app">
-              Whitelisted Access
+              App
             </Link>
           </div>
         </nav>
@@ -51,7 +51,7 @@ export default function LandingPage() {
               </Link>
               <Link className="secondaryAction appAccessAction" href="/app">
                 <Play size={17} />
-                App access
+                App Access
               </Link>
               <span className="subtleNote">Permitted for whitelisted addresses</span>
             </div>

@@ -57,6 +57,11 @@ function buildCustomAdapters(request: Request, serverSecret: string) {
 
 const DEFAULT_MANUAL_STEP_STAGES = ["ai_video_generation"];
 
+function shouldAutoRenderFullVideo(payload: Record<string, unknown>) {
+  const value = payload.auto_render_full_video ?? payload.autoRenderFullVideo;
+  return value !== false;
+}
+
 export async function startSamsarStepVideo(request: Request, payload: StartPayload) {
   const user = await requireSessionUser(request);
   const keys = await requireRuntimeKeys();
@@ -69,7 +74,7 @@ export async function startSamsarStepVideo(request: Request, payload: StartPaylo
     manual_step_stages:
       normalizedPayload.manual_step_stages ||
       normalizedPayload.manualStepStages ||
-      DEFAULT_MANUAL_STEP_STAGES,
+      (shouldAutoRenderFullVideo(normalizedPayload) ? [] : DEFAULT_MANUAL_STEP_STAGES),
     ...(shouldUseCustomAdapters()
       ? { custom_adapters: buildCustomAdapters(request, keys.serverSecret) }
       : {}),

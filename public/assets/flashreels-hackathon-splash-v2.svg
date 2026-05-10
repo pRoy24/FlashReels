@@ -1,0 +1,107 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="72" y1="40" x2="1510" y2="840" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#080a0d"/>
+      <stop offset="0.46" stop-color="#101419"/>
+      <stop offset="1" stop-color="#07100b"/>
+    </linearGradient>
+    <linearGradient id="brand" x1="108" y1="106" x2="430" y2="106" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6db5ff"/>
+      <stop offset="0.58" stop-color="#edf2f4"/>
+      <stop offset="1" stop-color="#60d394"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#6db5ff"/>
+      <stop offset="1" stop-color="#60d394"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="840" y1="130" x2="1440" y2="760" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#151b21"/>
+      <stop offset="1" stop-color="#0d1217"/>
+    </linearGradient>
+    <pattern id="grid" width="56" height="56" patternUnits="userSpaceOnUse">
+      <path d="M56 0H0V56" stroke="#c7d1d7" stroke-opacity="0.055"/>
+    </pattern>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="28" stdDeviation="28" flood-color="#000000" flood-opacity="0.34"/>
+    </filter>
+    <filter id="glow" x="-70%" y="-70%" width="240%" height="240%">
+      <feGaussianBlur stdDeviation="64"/>
+    </filter>
+    <clipPath id="appShotClip">
+      <rect x="28" y="28" width="618" height="348" rx="24"/>
+    </clipPath>
+  </defs>
+
+  <rect width="1600" height="900" fill="url(#bg)"/>
+  <rect width="1600" height="900" fill="url(#grid)"/>
+  <circle cx="238" cy="132" r="210" fill="#1d4f7b" opacity="0.24" filter="url(#glow)"/>
+  <circle cx="1310" cy="144" r="260" fill="#1f6b49" opacity="0.22" filter="url(#glow)"/>
+  <circle cx="1020" cy="812" r="310" fill="#243c68" opacity="0.16" filter="url(#glow)"/>
+
+  <g transform="translate(96 82)">
+    <g>
+      <rect x="0" y="0" width="44" height="44" rx="10" fill="#60d394"/>
+      <path d="M16 12L34 22L16 32V12Z" fill="#08100b"/>
+      <text x="62" y="31" fill="url(#brand)" font-family="Arial, Helvetica, sans-serif" font-size="30" font-weight="800">FlashReels</text>
+    </g>
+
+    <text x="0" y="156" fill="#60d394" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="900" letter-spacing="0.16em">RUNWAYML 2026 HACKATHON</text>
+    <text x="0" y="242" fill="#edf2f4" font-family="Arial, Helvetica, sans-serif" font-size="76" font-weight="900" letter-spacing="0">
+      <tspan x="0" dy="0">Create product</tspan>
+      <tspan x="0" dy="82">marketing reels</tspan>
+      <tspan x="0" dy="82">from images</tspan>
+      <tspan x="0" dy="82">and copy.</tspan>
+    </text>
+
+    <text x="0" y="604" fill="#c7d1d7" font-family="Arial, Helvetica, sans-serif" font-size="26" font-weight="500">
+      <tspan x="0" dy="0">A fast product-to-video workflow built for teams</tspan>
+      <tspan x="0" dy="38">that need short-form launch clips, promos, and ads.</tspan>
+    </text>
+
+    <g transform="translate(0 700)">
+      <rect x="0" y="0" width="304" height="50" rx="8" fill="#1e5b3d" stroke="#327d58"/>
+      <text x="152" y="32" fill="#f2fff7" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="800">Product images in</text>
+      <path d="M334 25H406" stroke="#6db5ff" stroke-width="2.5"/>
+      <path d="M396 16L407 25L396 34" stroke="#6db5ff" stroke-width="2.5" fill="none"/>
+      <rect x="432" y="0" width="236" height="50" rx="8" fill="#151b21" stroke="#37444f"/>
+      <text x="550" y="32" fill="#edf2f4" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="800">Reels out</text>
+    </g>
+  </g>
+
+  <g transform="translate(822 112)" filter="url(#shadow)">
+    <rect x="0" y="0" width="674" height="686" rx="32" fill="url(#panel)" stroke="#37444f"/>
+    <g clip-path="url(#appShotClip)">
+      <rect x="28" y="28" width="618" height="348" rx="24" fill="#080a0d"/>
+      <image href="file:///Users/pritamroy/Documents/others/workspace/samsar_one/FlashReels/public/assets/flashreels-app-screenshot-normalized.png" x="28" y="28" width="618" height="348" preserveAspectRatio="xMidYMid meet"/>
+      <rect x="28" y="28" width="618" height="348" fill="#07100b" opacity="0.10"/>
+      <rect x="28" y="28" width="618" height="96" fill="#080a0d" opacity="0.16"/>
+      <rect x="28" y="284" width="618" height="92" fill="#080a0d" opacity="0.18"/>
+    </g>
+    <rect x="28" y="28" width="618" height="348" rx="24" stroke="#6db5ff" stroke-opacity="0.34" stroke-width="1.5"/>
+
+    <g transform="translate(28 438)">
+      <rect x="0" y="0" width="618" height="200" rx="24" fill="#101419" stroke="#26313a"/>
+      <text x="30" y="42" fill="#edf2f4" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="900">Generation Stack</text>
+      <g transform="translate(30 74)" font-family="Arial, Helvetica, sans-serif">
+        <rect x="0" y="0" width="558" height="34" rx="8" fill="#151b21"/>
+        <text x="18" y="23" fill="#60d394" font-size="15" font-weight="900">RunwayML gen4.5</text>
+        <text x="186" y="23" fill="#c7d1d7" font-size="15" font-weight="700">primary video generation</text>
+        <rect x="0" y="48" width="558" height="34" rx="8" fill="#151b21"/>
+        <text x="18" y="71" fill="#6db5ff" font-size="15" font-weight="900">Avatar video</text>
+        <text x="186" y="71" fill="#c7d1d7" font-size="15" font-weight="700">presenter layer for reels</text>
+        <rect x="0" y="96" width="558" height="34" rx="8" fill="#151b21"/>
+        <text x="18" y="119" fill="#f1c453" font-size="15" font-weight="900">Public generative APIs</text>
+        <text x="236" y="119" fill="#c7d1d7" font-size="15" font-weight="700">supporting assets and copy</text>
+      </g>
+    </g>
+
+    <g transform="translate(520 26)">
+      <rect x="0" y="0" width="96" height="36" rx="18" fill="#0f2018" stroke="#327d58"/>
+      <circle cx="22" cy="18" r="5" fill="#60d394"/>
+      <text x="55" y="23" fill="#c7d1d7" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="800">LIVE</text>
+    </g>
+  </g>
+
+  <path d="M732 262C768 330 794 400 806 472C818 544 840 604 890 648" stroke="#6db5ff" stroke-opacity="0.28" stroke-width="2"/>
+  <path d="M700 322C752 378 786 438 800 502C814 566 844 610 908 636" stroke="#60d394" stroke-opacity="0.24" stroke-width="2"/>
+</svg>

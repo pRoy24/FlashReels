@@ -72,6 +72,7 @@ button:disabled {
 .landingNav .brandMark,
 .heroActions,
 .statusBadge,
+.feedNavPill,
 .accountChip,
 .primaryAction,
 .navButton,
@@ -165,6 +166,7 @@ button:disabled {
 .appAccessAction {
   border-color: var(--line);
   color: var(--soft);
+  text-align: center;
 }
 
 .primaryButton,
@@ -565,6 +567,25 @@ textarea:focus {
   justify-content: flex-end;
   gap: 10px;
   min-width: 0;
+}
+
+.feedNavPill {
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #0d1217;
+  color: var(--soft);
+  font-size: 13px;
+  font-weight: 800;
+  transition: border-color 180ms ease, color 180ms ease, transform 180ms ease, box-shadow 180ms ease;
+}
+
+.feedNavPill:hover {
+  border-color: #4f6575;
+  color: var(--text);
+  box-shadow: 0 0 0 4px rgba(109, 181, 255, 0.06);
+  transform: translateY(-1px);
 }
 
 .accountChip {

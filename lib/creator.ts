@@ -320,6 +320,7 @@ export function normalizeImageListCreatorPayload(raw: Record<string, unknown>) {
     ["add_narrator_avatar", "addNarratorAvatar", "enable_avatar", "enableAvatar"],
   );
   const limitSingleNarrator = readBooleanAlias(raw, ["limit_single_narrator", "limitSingleNarrator"]);
+  const autoRenderFullVideo = readBooleanAlias(raw, ["auto_render_full_video", "autoRenderFullVideo"]);
   const enableSubtitles = readBooleanAlias(
     raw,
     ["enable_subtitles", "enableSubtitles", "add_subtitles", "addSubtitles"],
@@ -399,6 +400,9 @@ export function normalizeImageListCreatorPayload(raw: Record<string, unknown>) {
   if (limitSingleNarrator !== undefined) {
     payload.limit_single_narrator = limitSingleNarrator;
   }
+  if (autoRenderFullVideo !== undefined) {
+    payload.auto_render_full_video = autoRenderFullVideo;
+  }
   if (enableSubtitles !== undefined) {
     payload.enable_subtitles = enableSubtitles;
   }
@@ -435,6 +439,7 @@ export function normalizeImageListCreatorPayload(raw: Record<string, unknown>) {
   delete payload.addFooterAnimation;
   delete payload.addNarratorAvatar;
   delete payload.limitSingleNarrator;
+  delete payload.autoRenderFullVideo;
 
   return payload;
 }

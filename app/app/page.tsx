@@ -534,20 +534,41 @@ function collectPreviewResources(status: ApiRecord | null): StagePreviewResource
   });
 }
 
-async function readApi<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, {
-    cache: "no-store",
-    ...init,
-    headers: {
-      ...(init?.body ? { "Content-Type": "application/json" } : {}),
-      ...(init?.headers || {}),
-    },
-  });
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(data?.message || "Request failed");
+type ApiRequestInit = RequestInit & { timeoutMs?: number };
+
+async function readApi<T>(url: string, init?: ApiRequestInit): Promise<T> {
+  const { timeoutMs = 30000, signal, ...requestInit } = init || {};
+  const controller = new AbortController();
+  const timeoutId = timeoutMs > 0
+    ? window.setTimeout(() => controller.abort(new Error(`Request timed out after ${Math.round(timeoutMs / 1000)}s.`)), timeoutMs)
+    : null;
+  signal?.addEventListener("abort", () => controller.abort(signal.reason), { once: true });
+  try {
+    const response = await fetch(url, {
+      cache: "no-store",
+      ...requestInit,
+      signal: controller.signal,
+      headers: {
+        ...(requestInit.body ? { "Content-Type": "application/json" } : {}),
+        ...(requestInit.headers || {}),
+      },
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data?.message || "Request failed");
+    }
+    return data as T;
+  } catch (error) {
+    if (controller.signal.aborted) {
+      const reason = controller.signal.reason;
+      throw reason instanceof Error ? reason : new Error("Request timed out.");
+    }
+    throw error;
+  } finally {
+    if (timeoutId) {
+      window.clearTimeout(timeoutId);
+    }
   }
-  return data as T;
 }
 
 function SetupWizard({
@@ -1223,6 +1244,7 @@ export default function FlashReelsApp() {
   const [status, setStatus] = useState<ApiRecord | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [approvalBusy, setApprovalBusy] = useState(false);
   const [polling, setPolling] = useState(false);
   const [library, setLibrary] = useState<LibraryVideo[]>([]);
   const [savedUrl, setSavedUrl] = useState("");
@@ -1239,7 +1261,6 @@ export default function FlashReelsApp() {
   const [currentFooterUrl, setCurrentFooterUrl] = useState("");
   const [currentJoinVideoId, setCurrentJoinVideoId] = useState("");
   const [currentActionBusy, setCurrentActionBusy] = useState("");
-  const autoProcessNextRef = useRef("");
   const statusText = getStatusText(status);
   const finalVideoUrl = getFinalVideoUrl(status);
   const currentSourceSessionId = firstString(getRequestId(status), requestId);
@@ -1262,10 +1283,12 @@ export default function FlashReelsApp() {
   const currentStep = firstString(step.current_step, status?.current_step);
   const currentStepLabel = currentStep ? formatStageLabel(currentStep) : "";
   const nextStepLabel = nextStep ? formatStageLabel(nextStep) : "";
+  const hasProcessNextAction = Boolean(nextStep) && (waitingForNext || canProcessNext || requiresUserAction);
   const terminal = ["FAILED", "CANCELED", "CANCELLED"].includes(statusText.toUpperCase());
   const activeStatus = ["PENDING", "RUNNING", "PROCESSING", "IN_PROGRESS"].includes(statusText.toUpperCase());
   const completedStatus = statusText.toUpperCase() === "COMPLETED";
-  const canContinue = statusText.toUpperCase() === "COMPLETED" && waitingForNext && canProcessNext && Boolean(nextStep);
+  const renderFinished = completedStatus && Boolean(finalVideoUrl);
+  const canContinue = hasProcessNextAction && canProcessNext;
   const completedBlocks = useMemo(() => {
     const completed = getRecord(status?.completed_step_resources);
     return STAGE_ORDER
@@ -1400,7 +1423,7 @@ export default function FlashReelsApp() {
   }, [loadLibrary, user]);
 
   useEffect(() => {
-    if (!requestId || terminal || canContinue || statusText.toUpperCase() === "COMPLETED") {
+    if (!requestId || terminal || canContinue || renderFinished) {
       return;
     }
 
@@ -1408,7 +1431,7 @@ export default function FlashReelsApp() {
       pollStatus();
     }, 5200);
     return () => clearTimeout(timeout);
-  }, [canContinue, pollStatus, requestId, statusText, terminal]);
+  }, [canContinue, pollStatus, renderFinished, requestId, terminal]);
 
   useEffect(() => {
     if (previewResources.length === 0) {
@@ -1460,44 +1483,43 @@ export default function FlashReelsApp() {
   }
 
   async function processNext() {
-    if (!requestId) {
+    if (!requestId || approvalBusy) {
       return;
     }
-    setBusy(true);
+    setApprovalBusy(true);
     setError("");
+    let nextRequestId = requestId;
+    let approvedStepLabel = nextStepLabel || "the next stage";
     try {
       const data = await readApi<ApiRecord>("/api/samsar/step/process-next", {
         method: "POST",
         body: JSON.stringify({ request_id: requestId }),
+        timeoutMs: 35000,
       });
-      const nextRequestId = getRequestId(data) || requestId;
+      nextRequestId = getRequestId(data) || requestId;
       setRequestId(nextRequestId);
       setStatus(data);
-      const detailedData = await readApi<ApiRecord>(buildDetailedStatusUrl(nextRequestId));
-      setStatus(detailedData);
-      await saveSessionSnapshot(detailedData, nextRequestId, lastSubmission, { refreshLibrary: true });
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Unable to continue to next step.");
+      const message = nextError instanceof Error ? nextError.message : "Unable to continue to next step.";
+      setError(`Timed out or failed while approving ${approvedStepLabel}: ${message}`);
+      setApprovalBusy(false);
+      return;
     } finally {
-      setBusy(false);
+      setApprovalBusy(false);
+    }
+
+    setPolling(true);
+    try {
+      const detailedData = await readApi<ApiRecord>(buildDetailedStatusUrl(nextRequestId), { timeoutMs: 35000 });
+      setStatus(detailedData);
+      await saveSessionSnapshot(detailedData, nextRequestId, lastSubmission, { refreshLibrary: false });
+    } catch (statusError) {
+      const message = statusError instanceof Error ? statusError.message : "Unknown error";
+      setError(`Approved ${approvedStepLabel}, but status refresh failed: ${message}`);
+    } finally {
+      setPolling(false);
     }
   }
-
-  useEffect(() => {
-    if (!canContinue || !requestId || busy || polling) {
-      if (!canContinue) {
-        autoProcessNextRef.current = "";
-      }
-      return;
-    }
-
-    const autoKey = `${requestId}:${currentStep}:${nextStep}`;
-    if (autoProcessNextRef.current === autoKey) {
-      return;
-    }
-    autoProcessNextRef.current = autoKey;
-    processNext();
-  }, [busy, canContinue, currentStep, nextStep, polling, requestId]);
 
   async function saveCurrentSession() {
     if (!requestId || !status) {
@@ -1821,6 +1843,9 @@ export default function FlashReelsApp() {
         </div>
 
         <div className="topbarActions">
+          <a className="feedNavPill" href="/feed" target="_blank" rel="noreferrer">
+            Feed
+          </a>
           <div className={`statusBadge status-${statusText.toLowerCase()}`}>
             {polling || activeStatus ? <Loader2 className="spin" size={16} /> : statusText.toUpperCase() === "COMPLETED" ? <Check size={16} /> : <CircleDashed size={16} />}
             {statusText}
@@ -1987,8 +2012,8 @@ export default function FlashReelsApp() {
                     <strong>{canContinue ? `Approve ${nextStepLabel}` : activeStatus ? `${currentStepLabel || "Current stage"} in progress` : "No approval needed"}</strong>
                   </div>
                 </div>
-                <button className="primaryButton" onClick={processNext} disabled={!canContinue || busy}>
-                  {busy ? <Loader2 className="spin" size={16} /> : <ArrowRight size={16} />}
+                <button className="primaryButton" onClick={processNext} disabled={!canContinue || approvalBusy}>
+                  {approvalBusy ? <Loader2 className="spin" size={16} /> : <ArrowRight size={16} />}
                   {canContinue ? `Approve and start ${nextStepLabel}` : "Approve next stage"}
                 </button>
                 <button className="secondaryButton" onClick={saveCurrentSession} disabled={!requestId || !status || busy}>

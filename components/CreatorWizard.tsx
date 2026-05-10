@@ -142,6 +142,7 @@ export function CreatorWizard({ busy, draftPayload, onSubmit }: CreatorWizardPro
   const [footerTitle, setFooterTitle] = useState("");
   const [enableFooter, setEnableFooter] = useState(false);
   const [enableAvatar, setEnableAvatar] = useState(true);
+  const [autoRenderFullVideo, setAutoRenderFullVideo] = useState(true);
   const [avatarModel, setAvatarModel] = useState("");
   const [limitSingleNarrator, setLimitSingleNarrator] = useState(true);
   const [ctaTextTop, setCtaTextTop] = useState("");
@@ -179,6 +180,7 @@ export function CreatorWizard({ busy, draftPayload, onSubmit }: CreatorWizardPro
       setFooterTitle(firstString(normalized.footer_title, footerMetadata?.title));
       setEnableFooter(Boolean(normalized.add_footer_animation));
       setEnableAvatar(normalized.add_narrator_avatar !== false);
+      setAutoRenderFullVideo(normalized.auto_render_full_video !== false && normalized.autoRenderFullVideo !== false);
       setAvatarModel(firstString(normalized.avatar_model));
       setLimitSingleNarrator(normalized.limit_single_narrator !== false);
       setCtaTextTop(firstString(normalized.cta_text_top));
@@ -217,6 +219,7 @@ export function CreatorWizard({ busy, draftPayload, onSubmit }: CreatorWizardPro
         footer_title: footerTitle || undefined,
         add_footer_animation: footerEnabled,
         add_narrator_avatar: enableAvatar,
+        auto_render_full_video: autoRenderFullVideo,
         avatar_model: avatarModel || undefined,
         limit_single_narrator: enableAvatar ? true : limitSingleNarrator,
         cta_text_top: ctaTextTop || undefined,
@@ -234,6 +237,7 @@ export function CreatorWizard({ busy, draftPayload, onSubmit }: CreatorWizardPro
   }, [
     aspectRatio,
     avatarModel,
+    autoRenderFullVideo,
     ctaLogo,
     ctaTextBottom,
     ctaTextTop,
@@ -554,6 +558,10 @@ export function CreatorWizard({ busy, draftPayload, onSubmit }: CreatorWizardPro
                   <label className="checkRow">
                     <input type="checkbox" checked={enableAvatar} onChange={(event) => setEnableAvatar(event.target.checked)} />
                     <span>Add avatar</span>
+                  </label>
+                  <label className="checkRow">
+                    <input type="checkbox" checked={autoRenderFullVideo} onChange={(event) => setAutoRenderFullVideo(event.target.checked)} />
+                    <span>Render full video automatically</span>
                   </label>
                 </div>
               </div>
