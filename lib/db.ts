@@ -3,6 +3,7 @@ import { readPersistentJson, writePersistentJson } from "@/lib/persistent-store"
 
 const DB_KEY = "flashreels:db:v1";
 const DB_FILE = "db.json";
+const DB_SEED_ENV = "FLASHREELS_DB_SEED_B64";
 
 export type FlashReelsMode = "image_list_to_video";
 
@@ -52,13 +53,36 @@ const EMPTY_DB: FlashReelsDatabase = {
 
 let writeQueue = Promise.resolve();
 
-export async function readDb(): Promise<FlashReelsDatabase> {
-  const parsed = await readPersistentJson<Partial<FlashReelsDatabase>>(DB_KEY, DB_FILE, EMPTY_DB);
+function parseSeededDb(): Partial<FlashReelsDatabase> {
+  const encoded = process.env[DB_SEED_ENV];
+  if (!encoded) {
+    return EMPTY_DB;
+  }
+
+  try {
+    const raw = Buffer.from(encoded, "base64url").toString("utf8");
+    const parsed = JSON.parse(raw) as Partial<FlashReelsDatabase>;
+    return parsed && typeof parsed === "object" ? parsed : EMPTY_DB;
+  } catch {
+    return EMPTY_DB;
+  }
+}
+
+function normalizeDb(parsed: Partial<FlashReelsDatabase>): FlashReelsDatabase {
   return {
     version: 1,
     users: Array.isArray(parsed.users) ? parsed.users : [],
     videos: Array.isArray(parsed.videos) ? parsed.videos : [],
   };
+}
+
+export async function readDb(): Promise<FlashReelsDatabase> {
+  const parsed = await readPersistentJson<Partial<FlashReelsDatabase>>(DB_KEY, DB_FILE, EMPTY_DB);
+  const normalized = normalizeDb(parsed);
+  if (normalized.users.length === 0 && normalized.videos.length === 0) {
+    return normalizeDb(parseSeededDb());
+  }
+  return normalized;
 }
 
 async function writeDb(db: FlashReelsDatabase) {

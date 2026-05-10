@@ -34,7 +34,15 @@ function cleanGenericJoinedTitle(title: string) {
     "retranslated reel",
     "current",
   ]);
-  const meaningfulParts = uniqueParts.filter((part) => !genericParts.has(part.toLowerCase()));
+  const meaningfulParts = uniqueParts.filter((part) => {
+    const normalizedPart = part.toLowerCase();
+    return (
+      !genericParts.has(normalizedPart) &&
+      normalizedPart !== "avatar" &&
+      normalizedPart !== "avatar-" &&
+      !normalizedPart.endsWith("-")
+    );
+  });
 
   if (meaningfulParts.length === 0) {
     return "Joined reel";
