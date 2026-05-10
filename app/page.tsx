@@ -25,10 +25,15 @@ export default function LandingPage() {
             <Film size={18} />
             <span>FlashReels</span>
           </div>
-          <Link className="navButton" href="/app">
-            Enter App
-            <ArrowRight size={16} />
-          </Link>
+          <div className="landingNavActions">
+            <Link className="navButton" href="/feed">
+              Public Feed
+            </Link>
+            <Link className="navButton" href="/app">
+              Enter App
+              <ArrowRight size={16} />
+            </Link>
+          </div>
         </nav>
 
         <div className="heroGrid">
@@ -43,6 +48,10 @@ export default function LandingPage() {
               <Link className="primaryAction" href="/app">
                 <Play size={17} />
                 Enter App
+              </Link>
+              <Link className="secondaryAction" href="/feed">
+                <Film size={17} />
+                View Feed
               </Link>
               <span className="subtleNote">Image list to video only</span>
             </div>

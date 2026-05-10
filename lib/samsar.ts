@@ -1,8 +1,12 @@
 import SamsarClient, {
   type JoinVideosInput,
   type JoinVideosResponse,
+  type CloneVideoInput,
+  type CloneVideoResponse,
   type TranslateVideoInput,
   type TranslateVideoResponse,
+  type UpdateVideoFooterImageInput,
+  type UpdateVideoFooterImageResponse,
   type CreateV2StepImageToVideoInput,
   type GlobalStatusDetailedResponse,
   type V2StepVideoDetailedStatusResponse,
@@ -123,14 +127,68 @@ export async function translateSamsarVideo(
   return response.data as TranslateVideoResponse;
 }
 
+export async function cloneSamsarVideo(
+  request: Request,
+  input: CloneVideoInput,
+): Promise<CloneVideoResponse> {
+  const user = await requireSessionUser(request);
+  const keys = await requireRuntimeKeys();
+  const client = getClient(keys.samsarApiKey);
+  const response = await client.cloneV2Video(input, {
+    externalUser: buildExternalUser(user),
+  });
+  return response.data;
+}
+
+export async function regenerateSamsarVideoAvatar(
+  request: Request,
+  input: CloneVideoInput,
+): Promise<CloneVideoResponse> {
+  const user = await requireSessionUser(request);
+  const keys = await requireRuntimeKeys();
+  const client = getClient(keys.samsarApiKey);
+  const response = await client.postV2<CloneVideoResponse>("video/regenerate_avatar", {
+    input,
+  }, {
+    externalUser: buildExternalUser(user),
+  });
+  return response.data;
+}
+
+export async function updateSamsarVideoFooter(
+  request: Request,
+  input: UpdateVideoFooterImageInput,
+): Promise<UpdateVideoFooterImageResponse> {
+  const user = await requireSessionUser(request);
+  const keys = await requireRuntimeKeys();
+  const client = getClient(keys.samsarApiKey);
+  const response = await client.updateV2VideoFooterImage(input, {
+    externalUser: buildExternalUser(user),
+  });
+  return response.data as UpdateVideoFooterImageResponse;
+}
+
 export async function joinSamsarVideos(
   request: Request,
   input: JoinVideosInput,
 ): Promise<JoinVideosResponse> {
-  await requireSessionUser(request);
+  const user = await requireSessionUser(request);
   const keys = await requireRuntimeKeys();
   const client = getClient(keys.samsarApiKey);
-  const response = await client.joinVideos(input);
+  let response;
+  try {
+    response = await client.postV2<JoinVideosResponse>("join_videos", {
+      input,
+    }, {
+      externalUser: buildExternalUser(user),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (!message.includes("One or more source videos were not found for this external user")) {
+      throw error;
+    }
+    response = await client.joinVideos(input);
+  }
   return response.data;
 }
 

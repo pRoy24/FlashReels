@@ -21,6 +21,7 @@ import {
   Play,
   RefreshCcw,
   Save,
+  Share2,
   Trash2,
   Volume2,
 } from "lucide-react";
@@ -70,6 +71,12 @@ interface LibraryVideo {
   samsarRequestId?: string;
   samsarSessionId?: string;
   status: string;
+  published?: boolean;
+  publishedAt?: string;
+  feedSlug?: string;
+  feedTitle?: string;
+  feedDescription?: string;
+  feedPosterUrl?: string;
   metadata?: Record<string, unknown>;
   createdAt: string;
   updatedAt?: string;
@@ -1154,8 +1161,15 @@ export default function FlashReelsApp() {
   const [selectedLibraryIds, setSelectedLibraryIds] = useState<string[]>([]);
   const [libraryLanguages, setLibraryLanguages] = useState<Record<string, string>>({});
   const [libraryActionBusy, setLibraryActionBusy] = useState("");
+  const [currentEditLanguage, setCurrentEditLanguage] = useState(LANGUAGE_OPTIONS[0].code);
+  const [currentFooterText, setCurrentFooterText] = useState("");
+  const [currentFooterUrl, setCurrentFooterUrl] = useState("");
+  const [currentJoinVideoId, setCurrentJoinVideoId] = useState("");
+  const [currentActionBusy, setCurrentActionBusy] = useState("");
+  const autoProcessNextRef = useRef("");
   const statusText = getStatusText(status);
   const finalVideoUrl = getFinalVideoUrl(status);
+  const currentSourceSessionId = firstString(getRequestId(status), requestId);
   const step = getRecord(status?.step);
   const waitingForNext = Boolean(step.waiting_for_process_next || status?.waiting_for_process_next);
   const requiresUserAction = Boolean(
@@ -1177,6 +1191,7 @@ export default function FlashReelsApp() {
   const nextStepLabel = nextStep ? formatStageLabel(nextStep) : "";
   const terminal = ["FAILED", "CANCELED", "CANCELLED"].includes(statusText.toUpperCase());
   const activeStatus = ["PENDING", "RUNNING", "PROCESSING", "IN_PROGRESS"].includes(statusText.toUpperCase());
+  const completedStatus = statusText.toUpperCase() === "COMPLETED";
   const canContinue = statusText.toUpperCase() === "COMPLETED" && waitingForNext && canProcessNext && Boolean(nextStep);
   const completedBlocks = useMemo(() => {
     const completed = getRecord(status?.completed_step_resources);
@@ -1203,6 +1218,9 @@ export default function FlashReelsApp() {
       || previewResources.find((resource) => timelineSeek >= resource.startTime && timelineSeek <= resource.endTime)
       || previewResources[previewResources.length - 1];
   }, [finalPreviewResource, previewResources, selectedResourceId, statusText, timelineSeek]);
+  const joinCandidates = useMemo(() => (
+    library.filter((video) => canUseLibraryVideo(video) && getLibraryRequestId(video) !== currentSourceSessionId)
+  ), [currentSourceSessionId, library]);
 
   const loadLibrary = useCallback(async () => {
     if (!user) {
@@ -1379,15 +1397,34 @@ export default function FlashReelsApp() {
         method: "POST",
         body: JSON.stringify({ request_id: requestId }),
       });
-      const detailedData = await readApi<ApiRecord>(buildDetailedStatusUrl(getRequestId(data) || requestId));
+      const nextRequestId = getRequestId(data) || requestId;
+      setRequestId(nextRequestId);
+      setStatus(data);
+      const detailedData = await readApi<ApiRecord>(buildDetailedStatusUrl(nextRequestId));
       setStatus(detailedData);
-      await saveSessionSnapshot(detailedData, requestId, lastSubmission, { refreshLibrary: true });
+      await saveSessionSnapshot(detailedData, nextRequestId, lastSubmission, { refreshLibrary: true });
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "Unable to continue to next step.");
     } finally {
       setBusy(false);
     }
   }
+
+  useEffect(() => {
+    if (!canContinue || !requestId || busy || polling) {
+      if (!canContinue) {
+        autoProcessNextRef.current = "";
+      }
+      return;
+    }
+
+    const autoKey = `${requestId}:${currentStep}:${nextStep}`;
+    if (autoProcessNextRef.current === autoKey) {
+      return;
+    }
+    autoProcessNextRef.current = autoKey;
+    processNext();
+  }, [busy, canContinue, currentStep, nextStep, polling, requestId]);
 
   async function saveCurrentSession() {
     if (!requestId || !status) {
@@ -1487,6 +1524,104 @@ export default function FlashReelsApp() {
     }
   }
 
+  async function enterDerivedSession(
+    data: ApiRecord,
+    payload: Record<string, unknown>,
+    emptyRequestMessage: string,
+  ) {
+    const nextRequestId = getRequestId(data);
+    if (!nextRequestId) {
+      throw new Error(emptyRequestMessage);
+    }
+    setRequestId(nextRequestId);
+    setStatus(data);
+    setLastSubmission(payload);
+    setDraftPayload(null);
+    setSavedUrl("");
+    setSelectedResourceId("");
+    setTimelineSeek(0);
+    const detailedData = await readApi<ApiRecord>(buildDetailedStatusUrl(nextRequestId));
+    setStatus(detailedData);
+    await saveSessionSnapshot(detailedData, nextRequestId, payload, { refreshLibrary: true });
+  }
+
+  async function startCurrentVideoEdit(operation: "regenerate_avatar" | "retranslate" | "update_footer") {
+    if (!currentSourceSessionId) {
+      setError("This render does not have a Samsar session id yet.");
+      return;
+    }
+    if (operation === "update_footer" && !currentFooterText.trim() && !currentFooterUrl.trim()) {
+      setError("Add footer CTA text or URL before regenerating the footer.");
+      return;
+    }
+
+    setBusy(true);
+    setCurrentActionBusy(operation);
+    setError("");
+    try {
+      const languageLabel = LANGUAGE_OPTIONS.find((option) => option.code === currentEditLanguage)?.label || currentEditLanguage.toUpperCase();
+      const data = await readApi<ApiRecord>("/api/samsar/video/edit", {
+        method: "POST",
+        body: JSON.stringify({
+          operation,
+          sourceSessionId: currentSourceSessionId,
+          language: currentEditLanguage,
+          ctaText: currentFooterText,
+          ctaUrl: currentFooterUrl,
+        }),
+      });
+      const payload = {
+        operation,
+        sourceSessionId: currentSourceSessionId,
+        prompt: operation === "retranslate"
+          ? `Retranslated reel (${languageLabel})`
+          : operation === "update_footer"
+            ? "Footer-updated reel"
+            : "Avatar-regenerated reel",
+        language: operation === "retranslate" ? currentEditLanguage : undefined,
+      };
+      await enterDerivedSession(data, payload, "Samsar did not return a request id for the edited video.");
+    } catch (editError) {
+      setError(editError instanceof Error ? editError.message : "Unable to start video edit.");
+    } finally {
+      setBusy(false);
+      setCurrentActionBusy("");
+    }
+  }
+
+  async function joinCurrentVideo() {
+    const otherVideo = library.find((video) => video.id === currentJoinVideoId);
+    if (!currentSourceSessionId || !otherVideo || !canUseLibraryVideo(otherVideo)) {
+      setError("Choose a completed library video to join with the current render.");
+      return;
+    }
+
+    setBusy(true);
+    setCurrentActionBusy("join");
+    setError("");
+    try {
+      const data = await readApi<ApiRecord>("/api/samsar/video/join", {
+        method: "POST",
+        body: JSON.stringify({
+          sessionIds: [currentSourceSessionId, otherVideo.samsarSessionId || otherVideo.samsarRequestId],
+          blendScenes: true,
+        }),
+      });
+      await enterDerivedSession(data, {
+        operation: "join",
+        sourceSessionId: currentSourceSessionId,
+        sourceVideoId: otherVideo.id,
+        prompt: `Joined reel: current + ${otherVideo.title}`,
+      }, "Samsar did not return a request id for the joined reel.");
+      setCurrentJoinVideoId("");
+    } catch (joinError) {
+      setError(joinError instanceof Error ? joinError.message : "Unable to join videos.");
+    } finally {
+      setBusy(false);
+      setCurrentActionBusy("");
+    }
+  }
+
   async function joinSelectedVideos() {
     const videosToJoin = selectedLibraryIds
       .map((videoId) => library.find((video) => video.id === videoId))
@@ -1534,6 +1669,38 @@ export default function FlashReelsApp() {
     await readApi(`/api/library/${encodeURIComponent(videoId)}`, { method: "DELETE" });
     setSelectedLibraryIds((current) => current.filter((selectedVideoId) => selectedVideoId !== videoId));
     await loadLibrary();
+  }
+
+  async function publishVideo(video: LibraryVideo) {
+    setLibraryActionBusy(`publish:${video.id}`);
+    setError("");
+    try {
+      const data = await readApi<{ video: LibraryVideo; feed: { slug: string } | null }>("/api/feed/publish", {
+        method: "POST",
+        body: JSON.stringify({ videoId: video.id }),
+      });
+      setLibrary((current) => current.map((item) => item.id === video.id ? data.video : item));
+    } catch (publishError) {
+      setError(publishError instanceof Error ? publishError.message : "Unable to publish this video.");
+    } finally {
+      setLibraryActionBusy("");
+    }
+  }
+
+  async function unpublishVideo(video: LibraryVideo) {
+    setLibraryActionBusy(`unpublish:${video.id}`);
+    setError("");
+    try {
+      const data = await readApi<{ video: LibraryVideo; feed: null }>("/api/feed/publish", {
+        method: "DELETE",
+        body: JSON.stringify({ videoId: video.id }),
+      });
+      setLibrary((current) => current.map((item) => item.id === video.id ? data.video : item));
+    } catch (publishError) {
+      setError(publishError instanceof Error ? publishError.message : "Unable to unpublish this video.");
+    } finally {
+      setLibraryActionBusy("");
+    }
   }
 
   async function logout() {
@@ -1599,7 +1766,7 @@ export default function FlashReelsApp() {
         <section className="studio">
           <header className="studioTopbar">
             <div>
-              <h1>Add product images, a CTA URL, and generate a video</h1>
+              <h1>Add listing images, metadata, and CTA to start a render</h1>
             </div>
           </header>
 
@@ -1646,6 +1813,89 @@ export default function FlashReelsApp() {
                   </button>
                 </div>
               </div>
+
+              {completedStatus && finalVideoUrl ? (
+                <div className="completedEditPanel">
+                  <div className="completedEditHeader">
+                    <div>
+                      <span>Completed render actions</span>
+                      <strong>Create a new editable session from this video</strong>
+                    </div>
+                  </div>
+                  <div className="completedActionGrid">
+                    <button
+                      type="button"
+                      className="secondaryButton"
+                      onClick={() => startCurrentVideoEdit("regenerate_avatar")}
+                      disabled={busy || currentActionBusy === "regenerate_avatar"}
+                    >
+                      {currentActionBusy === "regenerate_avatar" ? <Loader2 className="spin" size={16} /> : <RefreshCcw size={16} />}
+                      Regenerate avatar
+                    </button>
+                    <div className="inlineActionGroup">
+                      <input
+                        value={currentFooterText}
+                        onChange={(event) => setCurrentFooterText(event.target.value)}
+                        placeholder="Footer CTA text"
+                        aria-label="Footer CTA text"
+                      />
+                      <input
+                        value={currentFooterUrl}
+                        onChange={(event) => setCurrentFooterUrl(event.target.value)}
+                        placeholder="Footer URL"
+                        aria-label="Footer URL"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => startCurrentVideoEdit("update_footer")}
+                        disabled={busy || currentActionBusy === "update_footer"}
+                      >
+                        {currentActionBusy === "update_footer" ? <Loader2 className="spin" size={15} /> : <RefreshCcw size={15} />}
+                        Regenerate footer
+                      </button>
+                    </div>
+                    <div className="inlineActionGroup">
+                      <select
+                        value={currentEditLanguage}
+                        onChange={(event) => setCurrentEditLanguage(event.target.value)}
+                        aria-label="Retranslate current video language"
+                      >
+                        {LANGUAGE_OPTIONS.map((option) => (
+                          <option key={option.code} value={option.code}>{option.label}</option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => startCurrentVideoEdit("retranslate")}
+                        disabled={busy || currentActionBusy === "retranslate"}
+                      >
+                        {currentActionBusy === "retranslate" ? <Loader2 className="spin" size={15} /> : <Languages size={15} />}
+                        Retranslate
+                      </button>
+                    </div>
+                    <div className="inlineActionGroup">
+                      <select
+                        value={currentJoinVideoId}
+                        onChange={(event) => setCurrentJoinVideoId(event.target.value)}
+                        aria-label="Video to join with current render"
+                      >
+                        <option value="">Choose library video</option>
+                        {joinCandidates.map((video) => (
+                          <option key={video.id} value={video.id}>{video.title}</option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={joinCurrentVideo}
+                        disabled={busy || !currentJoinVideoId || currentActionBusy === "join"}
+                      >
+                        {currentActionBusy === "join" ? <Loader2 className="spin" size={15} /> : <ListVideo size={15} />}
+                        Join reel
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
 
               <StagedPreviewPanel
                 status={status}
@@ -1722,17 +1972,41 @@ export default function FlashReelsApp() {
             const sourceIsVideo = sourceUrl && !sourceIsImage;
             const usableVideo = canUseLibraryVideo(video);
             const language = libraryLanguages[video.id] || LANGUAGE_OPTIONS[0].code;
+            const feedUrl = video.feedSlug ? `/feed/${video.feedSlug}` : "";
             return (
             <article className="libraryCard" key={video.id}>
-              <label className="librarySelectRow">
-                <input
-                  type="checkbox"
-                  checked={selectedLibraryIds.includes(video.id)}
-                  disabled={!usableVideo}
-                  onChange={(event) => toggleLibrarySelection(video, event.target.checked)}
-                />
-                <span>Join</span>
-              </label>
+              <div className="librarySelectRow">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={selectedLibraryIds.includes(video.id)}
+                    disabled={!usableVideo}
+                    onChange={(event) => toggleLibrarySelection(video, event.target.checked)}
+                  />
+                  <span>Join</span>
+                </label>
+                {video.published && feedUrl ? (
+                  <button
+                    type="button"
+                    className="libraryPublishToggle published"
+                    onClick={() => unpublishVideo(video)}
+                    disabled={busy || libraryActionBusy === `unpublish:${video.id}`}
+                  >
+                    {libraryActionBusy === `unpublish:${video.id}` ? <Loader2 className="spin" size={13} /> : <Share2 size={13} />}
+                    Unpublish
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="libraryPublishToggle"
+                    onClick={() => publishVideo(video)}
+                    disabled={!usableVideo || busy || libraryActionBusy === `publish:${video.id}`}
+                  >
+                    {libraryActionBusy === `publish:${video.id}` ? <Loader2 className="spin" size={13} /> : <Share2 size={13} />}
+                    Publish
+                  </button>
+                )}
+              </div>
               <button className="libraryLoadButton" type="button" onClick={() => loadPreviousSession(video)}>
                 {sourceIsVideo ? <video src={sourceUrl} muted playsInline /> : sourceIsImage ? <img src={sourceUrl} alt="" /> : (
                   <span className="libraryPlaceholder">
@@ -1773,6 +2047,12 @@ export default function FlashReelsApp() {
                       <Download size={14} />
                       Download
                     </a>
+                    {feedUrl ? (
+                      <a href={feedUrl} target="_blank" rel="noreferrer">
+                        <Share2 size={14} />
+                        Feed
+                      </a>
+                    ) : null}
                   </>
                 ) : <button onClick={() => loadPreviousSession(video)}>Load</button>}
                 <button onClick={() => removeVideo(video.id)} aria-label="Delete saved video">

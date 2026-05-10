@@ -62,6 +62,7 @@ button:disabled {
 }
 
 .landingNav,
+.landingNavActions,
 .appTopbar,
 .topbarActions,
 .studioTopbar,
@@ -90,6 +91,12 @@ button:disabled {
   gap: 18px;
 }
 
+.landingNavActions {
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .brandMark,
 .brandBlock {
   gap: 10px;
@@ -115,6 +122,7 @@ button:disabled {
 
 .navButton,
 .primaryAction,
+.secondaryAction,
 .primaryButton,
 .secondaryButton {
   justify-content: center;
@@ -141,6 +149,11 @@ button:disabled {
 
 .primaryAction {
   padding: 0 16px;
+}
+
+.secondaryAction {
+  padding: 0 16px;
+  background: transparent;
 }
 
 .primaryButton,
@@ -664,6 +677,7 @@ textarea:focus {
 
 .creatorPanelShell.expanded {
   z-index: 8;
+  width: min(calc(50vw + 160px), calc(100vw - 122px));
 }
 
 .creatorPanelShell.expanded .creatorPanelBody {
@@ -671,7 +685,7 @@ textarea:focus {
   top: calc(100% + 10px);
   left: 0;
   z-index: 8;
-  width: min(calc(50vw + 160px), calc(100vw - 122px));
+  width: 100%;
   max-height: calc(100vh - 144px);
   overflow: auto;
   filter: drop-shadow(0 24px 70px rgba(0, 0, 0, 0.42));
@@ -1112,6 +1126,82 @@ textarea:focus {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #0b0f13;
+}
+
+.completedEditPanel {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0b0f13;
+}
+
+.completedEditHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.completedEditHeader div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.completedEditHeader span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.completedEditHeader strong {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.completedActionGrid {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.7fr) minmax(260px, 1.4fr) minmax(220px, 1fr) minmax(240px, 1fr);
+  gap: 10px;
+  align-items: stretch;
+}
+
+.inlineActionGroup {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.inlineActionGroup:has(input + input) {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+}
+
+.inlineActionGroup input,
+.inlineActionGroup select {
+  min-width: 0;
+  height: 40px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.inlineActionGroup button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 40px;
+  padding: 0 10px;
+  border: 1px solid #327d58;
+  border-radius: 6px;
+  background: #1e5b3d;
+  color: #f2fff7;
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
 }
 
 .renderProgressTrack {
@@ -1604,6 +1694,7 @@ textarea:focus {
 .librarySelectRow {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
   color: var(--muted);
   font-size: 12px;
@@ -1611,10 +1702,39 @@ textarea:focus {
   text-transform: uppercase;
 }
 
+.librarySelectRow label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .librarySelectRow input {
   width: 16px;
   height: 16px;
   accent-color: var(--accent);
+}
+
+.libraryPublishToggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 9px;
+  border: 1px solid #327d58;
+  border-radius: 6px;
+  background: #1e5b3d;
+  color: #f2fff7;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.libraryPublishToggle.published {
+  border-color: #6f4c22;
+  background: #513718;
+  color: #fff0d6;
 }
 
 .libraryLoadButton {
@@ -1704,9 +1824,178 @@ textarea:focus {
   min-width: 36px;
 }
 
+.libraryActions button:not([aria-label]) {
+  flex: 1;
+}
+
 .libraryActions button[aria-label] {
   width: 36px;
   padding: 0;
+}
+
+.publicFeedShell {
+  min-height: 100vh;
+  background: #0c0f12;
+  color: #f4f6f7;
+}
+
+.publicFeedHeader {
+  position: fixed;
+  z-index: 10;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px clamp(18px, 4vw, 54px);
+  background: linear-gradient(180deg, rgba(12, 15, 18, 0.9), rgba(12, 15, 18, 0));
+  pointer-events: none;
+  transition: opacity 180ms ease;
+}
+
+.publicFeedBrand,
+.publicFeedLink {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  background: rgba(12, 15, 18, 0.64);
+  color: #f4f6f7;
+  font-size: 13px;
+  font-weight: 900;
+  backdrop-filter: blur(16px);
+}
+
+.publicFeedTrack {
+  height: 100vh;
+  overflow-y: auto;
+  scroll-snap-type: y mandatory;
+}
+
+.publicFeedItem {
+  min-height: 100vh;
+  scroll-snap-align: start;
+  position: relative;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  padding: 0;
+  background: #050607;
+}
+
+.publicFeedVideoFrame {
+  width: 100%;
+  height: 100vh;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.publicFeedVideoFrame video {
+  width: 100%;
+  height: 100%;
+  max-height: 100vh;
+  border: 0;
+  border-radius: 0;
+  background: #050607;
+  object-fit: contain;
+  box-shadow: none;
+}
+
+.publicFeedMeta {
+  position: absolute;
+  left: clamp(14px, 4vw, 44px);
+  right: clamp(14px, 4vw, 44px);
+  bottom: clamp(18px, 5vh, 46px);
+  display: grid;
+  gap: 8px;
+  align-content: end;
+  max-width: 620px;
+  padding: 16px;
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(5, 6, 7, 0.08), rgba(5, 6, 7, 0.62));
+  text-shadow: 0 2px 16px rgba(0, 0, 0, 0.72);
+  pointer-events: none;
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.publicFeedShell.overlayHidden .publicFeedHeader,
+.publicFeedShell.overlayHidden .publicFeedMeta {
+  opacity: 0;
+}
+
+.publicFeedShell.overlayHidden .publicFeedMeta {
+  transform: translateY(8px);
+}
+
+.publicFeedMeta p,
+.publicFeedMeta span {
+  margin: 0;
+  color: rgba(244, 246, 247, 0.78);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.publicFeedMeta h1 {
+  margin: 0;
+  color: #ffffff;
+  font-size: clamp(18px, 2.2vw, 28px);
+  line-height: 1.08;
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
+}
+
+.publicFeedActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+  pointer-events: auto;
+}
+
+.publicFeedActions a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.17);
+  border-radius: 6px;
+  background: #f4f6f7;
+  color: #101113;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.publicFeedActions a + a {
+  background: rgba(255, 255, 255, 0.08);
+  color: #f4f6f7;
+}
+
+.publicFeedEmpty {
+  min-height: 100vh;
+  display: grid;
+  place-content: center;
+  gap: 12px;
+  padding: 28px;
+  text-align: center;
+}
+
+.publicFeedEmpty h1,
+.publicFeedEmpty p {
+  margin: 0;
+}
+
+.publicFeedEmpty p {
+  color: #aeb8c1;
 }
 
 .spin {
@@ -1797,6 +2086,10 @@ textarea:focus {
   .appBody.libraryExpanded {
     grid-template-columns: minmax(0, 1fr) 300px;
   }
+
+  .completedActionGrid {
+    grid-template-columns: 1fr 1fr;
+  }
 }
 
 @media (max-width: 920px) {
@@ -1804,6 +2097,14 @@ textarea:focus {
   .sectionGrid,
   .studioGrid {
     grid-template-columns: 1fr;
+  }
+
+  .publicFeedItem {
+    display: grid;
+  }
+
+  .publicFeedMeta {
+    max-width: none;
   }
 
   .heroVisual {
@@ -1821,7 +2122,10 @@ textarea:focus {
   }
 
   .wizardJsonLayout,
-  .checkGrid {
+  .checkGrid,
+  .completedActionGrid,
+  .inlineActionGroup,
+  .inlineActionGroup:has(input + input) {
     grid-template-columns: 1fr;
   }
 
@@ -1909,5 +2213,27 @@ textarea:focus {
   .audioTrack {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .publicFeedHeader {
+    padding: 12px;
+  }
+
+  .publicFeedItem {
+    padding: 0;
+  }
+
+  .publicFeedVideoFrame video {
+    width: 100%;
+    max-height: 100vh;
+  }
+
+  .publicFeedMeta h1 {
+    font-size: 20px;
+    line-height: 1.05;
+  }
+
+  .publicFeedActions a {
+    flex: 1;
   }
 }

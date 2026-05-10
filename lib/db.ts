@@ -27,6 +27,12 @@ export interface FlashReelsVideo {
   samsarRequestId?: string;
   samsarSessionId?: string;
   status: string;
+  published?: boolean;
+  publishedAt?: string;
+  feedSlug?: string;
+  feedTitle?: string;
+  feedDescription?: string;
+  feedPosterUrl?: string;
   metadata?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
