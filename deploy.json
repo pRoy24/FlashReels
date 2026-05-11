@@ -1,0 +1,24 @@
+{
+  "vercel": {
+    "defaultScope": "proy24s-projects",
+    "defaultProject": "flash-reels",
+    "redis": {
+      "integration": "redis",
+      "resourceName": "flashreels-redis",
+      "plan": "",
+      "primaryRegion": "iad1",
+      "highAvailability": "None",
+      "eviction": false,
+      "prodPack": false,
+      "autoUpgrade": false
+    }
+  },
+  "targets": {
+    "production": {
+      "environment": "production"
+    },
+    "preview": {
+      "environment": "preview"
+    }
+  }
+}

@@ -61,6 +61,7 @@ interface SetupStatus {
       url?: string;
       token?: string;
     };
+    detectedEnv?: string[];
   };
   envFile?: {
     target: string;
@@ -1083,7 +1084,12 @@ function getRuntimeSecretWriteStatus(setup: SetupStatus | null) {
   }
   return {
     ready: false,
-    source: setup.persistence?.reason || "Runtime secret storage is not writable.",
+    source: [
+      setup.persistence?.reason || "Runtime secret storage is not writable.",
+      setup.persistence?.detectedEnv?.length
+        ? `Detected storage env: ${setup.persistence.detectedEnv.join(", ")}`
+        : "No Redis/KV/Upstash env vars are visible to this deployment.",
+    ].join(" "),
   };
 }
 

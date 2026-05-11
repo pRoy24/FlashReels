@@ -7,6 +7,9 @@
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "dev:local": "node scripts/dev.mjs --local",
+    "deploy:setup": "node scripts/bootstrap-deploy.mjs",
+    "deploy:setup:production": "node scripts/bootstrap-deploy.mjs production",
+    "deploy:migrate:production": "node scripts/migrate-production-data.mjs production",
     "build": "next build --webpack",
     "start": "next start",
     "typecheck": "tsc --noEmit"

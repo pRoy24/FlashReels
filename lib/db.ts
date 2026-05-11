@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { readPersistentJson, writePersistentJson } from "@/lib/persistent-store";
+import { getPersistenceStatus, readPersistentJson, writePersistentJson } from "@/lib/persistent-store";
 
 const DB_KEY = "flashreels:db:v1";
 const DB_FILE = "db.json";
@@ -59,6 +59,10 @@ const EMPTY_DB: FlashReelsDatabase = {
 
 let writeQueue = Promise.resolve();
 
+function hasSeededDb() {
+  return Boolean(process.env[DB_SEED_ENV]?.trim());
+}
+
 function parseSeededDb(): Partial<FlashReelsDatabase> {
   const encoded = process.env[DB_SEED_ENV];
   if (!encoded) {
@@ -100,8 +104,18 @@ function normalizeDb(parsed: Partial<FlashReelsDatabase>): FlashReelsDatabase {
 export async function readDb(): Promise<FlashReelsDatabase> {
   const parsed = await readPersistentJson<Partial<FlashReelsDatabase>>(DB_KEY, DB_FILE, EMPTY_DB);
   const normalized = normalizeDb(parsed);
-  if (normalized.users.length === 0 && normalized.videos.length === 0) {
-    return normalizeDb(parseSeededDb());
+  if (normalized.users.length === 0 && normalized.videos.length === 0 && hasSeededDb()) {
+    const seeded = normalizeDb(parseSeededDb());
+    if (seeded.users.length > 0 || seeded.videos.length > 0) {
+      if (getPersistenceStatus().persistent) {
+        try {
+          await writePersistentJson(DB_KEY, DB_FILE, seeded);
+        } catch {
+          // Keep the seed usable even if the persistent store is not writable yet.
+        }
+      }
+      return seeded;
+    }
   }
   return normalized;
 }

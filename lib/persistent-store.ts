@@ -50,6 +50,8 @@ function getRedisConfig() {
     ["KV_REST_API_URL", "KV_REST_API_TOKEN"],
     ["REDIS_REST_API_URL", "REDIS_REST_API_TOKEN"],
     ["VERCEL_REDIS_REST_API_URL", "VERCEL_REDIS_REST_API_TOKEN"],
+    ["REDIS_REST_URL", "REDIS_REST_TOKEN"],
+    ["REDIS_API_URL", "REDIS_API_TOKEN"],
   ] as const;
 
   for (const [urlName, tokenName] of restPairs) {
@@ -60,16 +62,35 @@ function getRedisConfig() {
     }
   }
 
-  const redisUrl = envValue(["REDIS_URL", "KV_URL", "REDISCLOUD_URL", "REDIS_TLS_URL"]);
+  const inferredRest = inferRedisRestConfig();
+  if (inferredRest) {
+    return inferredRest;
+  }
+
+  const redisUrl = envValue([
+    "REDIS_URL",
+    "KV_URL",
+    "REDISCLOUD_URL",
+    "REDIS_TLS_URL",
+    "REDIS_URI",
+    "REDIS_DATABASE_URL",
+    "REDIS_CONNECTION_STRING",
+    "VERCEL_REDIS_URL",
+  ]);
   if (redisUrl) {
     return { kind: "url", url: redisUrl.value, urlEnv: redisUrl.name } satisfies RedisUrlConfig;
   }
 
-  const host = envValue(["REDIS_HOST", "REDIS_ENDPOINT"]);
+  const inferredUrl = inferRedisUrlConfig();
+  if (inferredUrl) {
+    return inferredUrl;
+  }
+
+  const host = envValue(["REDIS_HOST", "REDIS_ENDPOINT", "REDIS_PRIVATE_ENDPOINT", "REDIS_PUBLIC_ENDPOINT"]);
   if (host) {
     const port = envValue(["REDIS_PORT"])?.value || "6379";
     const username = envValue(["REDIS_USERNAME"])?.value || "";
-    const password = envValue(["REDIS_PASSWORD"])?.value || "";
+    const password = envValue(["REDIS_PASSWORD", "REDIS_PASS"])?.value || "";
     const protocol = process.env.REDIS_TLS === "1" || process.env.REDIS_TLS === "true" ? "rediss" : "redis";
     const auth = password
       ? `${username ? encodeURIComponent(username) : ""}:${encodeURIComponent(password)}@`
@@ -82,6 +103,62 @@ function getRedisConfig() {
   }
 
   return null;
+}
+
+function inferRedisRestConfig(): RedisRestConfig | null {
+  const entries = Object.entries(process.env)
+    .map(([name, value]) => [name, value?.trim() || ""] as const)
+    .filter(([name, value]) => value && /(?:REDIS|KV|UPSTASH)/i.test(name));
+  const urlEntries = entries.filter(([name, value]) => (
+    /REST/i.test(name) &&
+    /URL|ENDPOINT/i.test(name) &&
+    /^https?:\/\//i.test(value)
+  ));
+
+  for (const [urlName, url] of urlEntries) {
+    const tokenNameCandidates = [
+      urlName.replace(/URL/i, "TOKEN"),
+      urlName.replace(/ENDPOINT/i, "TOKEN"),
+      urlName.replace(/REST.*$/i, "REST_API_TOKEN"),
+      urlName.replace(/REST.*$/i, "REST_TOKEN"),
+      `${urlName.replace(/(?:_?URL|_?ENDPOINT)$/i, "")}_TOKEN`,
+    ];
+    const tokenCandidate = tokenNameCandidates
+      .map((name) => ({ name, value: process.env[name]?.trim() || "" }))
+      .find((candidate) => candidate.value);
+    if (tokenCandidate) {
+      return {
+        kind: "rest",
+        url,
+        token: tokenCandidate.value,
+        urlEnv: urlName,
+        tokenEnv: tokenCandidate.name,
+      };
+    }
+  }
+
+  return null;
+}
+
+function inferRedisUrlConfig(): RedisUrlConfig | null {
+  const entry = Object.entries(process.env)
+    .map(([name, value]) => [name, value?.trim() || ""] as const)
+    .find(([name, value]) => (
+      value &&
+      /(?:REDIS|KV|UPSTASH)/i.test(name) &&
+      /URL|URI|CONNECTION|ENDPOINT/i.test(name) &&
+      /^rediss?:\/\//i.test(value)
+    ));
+
+  return entry
+    ? { kind: "url", url: entry[1], urlEnv: entry[0] }
+    : null;
+}
+
+function getDetectedStorageEnvNames() {
+  return Object.keys(process.env)
+    .filter((name) => /(?:REDIS|KV|UPSTASH)/i.test(name))
+    .sort();
 }
 
 function getRedis() {
@@ -329,5 +406,6 @@ export function getPersistenceStatus() {
       url: config?.kind === "rest" ? config.urlEnv : config?.kind === "url" ? config.urlEnv : "",
       token: config?.kind === "rest" ? config.tokenEnv : "",
     },
+    detectedEnv: getDetectedStorageEnvNames(),
   };
 }
