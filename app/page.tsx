@@ -1,8 +1,45 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowRight, Boxes, Film, ShieldCheck, Sparkles } from "lucide-react";
 
 import { LandingVideoReel } from "@/app/LandingVideoReel";
 import { listPublishedFeedItems } from "@/lib/feed";
+
+const siteUrl = process.env.FLASHREELS_PUBLIC_BASE_URL
+  || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
+const landingTitle = "FlashReels | Step-Controlled Generative Video";
+const landingDescription = "Create, review, and publish RunwayML-powered image-list-to-video reels from a focused production workspace.";
+const landingOgImage = "/opengraph-image";
+
+export const metadata: Metadata = {
+  metadataBase: new URL(siteUrl),
+  title: landingTitle,
+  description: landingDescription,
+  alternates: {
+    canonical: "/",
+  },
+  openGraph: {
+    title: landingTitle,
+    description: landingDescription,
+    url: "/",
+    siteName: "FlashReels",
+    type: "website",
+    images: [
+      {
+        url: landingOgImage,
+        width: 1200,
+        height: 630,
+        alt: "FlashReels splash preview",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: landingTitle,
+    description: landingDescription,
+    images: [landingOgImage],
+  },
+};
 
 const sections = [
   {
