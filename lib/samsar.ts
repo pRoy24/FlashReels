@@ -14,8 +14,9 @@ import SamsarClient, {
 } from "samsar-js";
 
 import { requireSessionUserRecord } from "@/lib/auth";
-import { buildFlashReelsExternalUser, getSamsarApiKeyForUser } from "@/lib/billing";
+import { buildFlashReelsExternalUser } from "@/lib/billing";
 import { normalizeImageListCreatorPayload } from "@/lib/creator";
+import type { FlashReelsUser } from "@/lib/db";
 import { apiError } from "@/lib/http";
 import {
   getAdapterBaseUrl,
@@ -44,13 +45,24 @@ function buildCustomAdapters(request: Request, serverSecret: string) {
   };
 }
 
-function getV2RequestOptions(user: Awaited<ReturnType<typeof requireSessionUserRecord>>) {
-  if (user.role === "admin" || user.externalApiKey) {
+function getV2RequestOptions(user: FlashReelsUser) {
+  if (user.role === "admin") {
     return {};
   }
 
   return {
     externalUser: buildFlashReelsExternalUser(user),
+  };
+}
+
+async function getBaseVideoClient(request: Request) {
+  const keys = await getRuntimeKeys(request);
+  if (!keys.samsarApiKey) {
+    throw apiError("Base SAMSAR_API_KEY is not configured. Admin and external-user video generation must be routed through the base Samsar API key.", 412);
+  }
+  return {
+    client: getClient(keys.samsarApiKey),
+    keys,
   };
 }
 
@@ -63,11 +75,7 @@ function shouldAutoRenderFullVideo(payload: Record<string, unknown>) {
 
 export async function startSamsarStepVideo(request: Request, payload: StartPayload) {
   const user = await requireSessionUserRecord(request);
-  const keys = await getRuntimeKeys(request);
-  if (!keys.samsarApiKey && !user.externalApiKey) {
-    throw apiError("Samsar API key is not configured.", 412);
-  }
-  const client = getClient(await getSamsarApiKeyForUser(request, user));
+  const { client, keys } = await getBaseVideoClient(request);
   const normalizedPayload = normalizeImageListCreatorPayload(
     payload as Record<string, unknown>,
   );
@@ -81,6 +89,14 @@ export async function startSamsarStepVideo(request: Request, payload: StartPaylo
       ? { custom_adapters: buildCustomAdapters(request, keys.serverSecret) }
       : {}),
   };
+  console.info("[FlashReels] Starting Samsar step video", {
+    userId: user.id,
+    role: user.role || "user",
+    route: user.role === "admin" ? "base" : "base_external_user",
+    imageCount: Array.isArray(input.image_urls) ? input.image_urls.length : 0,
+    videoModel: input.video_model,
+    hasCustomAdapters: Boolean(input.custom_adapters),
+  });
   const response = await client.createV2StepImageToVideo(input, {
     ...getV2RequestOptions(user),
   });
@@ -92,11 +108,7 @@ export async function getSamsarStepStatusDetailed(
   requestId: string,
 ): Promise<V2StepVideoDetailedStatusResponse> {
   const user = await requireSessionUserRecord(request);
-  const keys = await getRuntimeKeys(request);
-  if (!keys.samsarApiKey && !user.externalApiKey) {
-    throw apiError("Samsar API key is not configured.", 412);
-  }
-  const client = getClient(await getSamsarApiKeyForUser(request, user));
+  const { client } = await getBaseVideoClient(request);
   const response = await client.getV2StepVideoStatusDetailed(requestId, {
     ...getV2RequestOptions(user),
   });
@@ -110,11 +122,7 @@ export async function getSamsarVideoStatusDetailed(
   requestId: string,
 ): Promise<GlobalStatusDetailedResponse> {
   const user = await requireSessionUserRecord(request);
-  const keys = await getRuntimeKeys(request);
-  if (!keys.samsarApiKey && !user.externalApiKey) {
-    throw apiError("Samsar API key is not configured.", 412);
-  }
-  const client = getClient(await getSamsarApiKeyForUser(request, user));
+  const { client } = await getBaseVideoClient(request);
   const response = await client.getV2StatusDetailed(requestId, {
     ...getV2RequestOptions(user),
   });
@@ -126,7 +134,7 @@ export async function translateSamsarVideo(
   input: TranslateVideoInput,
 ): Promise<TranslateVideoResponse> {
   const user = await requireSessionUserRecord(request);
-  const client = getClient(await getSamsarApiKeyForUser(request, user));
+  const { client } = await getBaseVideoClient(request);
   const response = await client.translateV2Video(input, {
     ...getV2RequestOptions(user),
   });
@@ -138,7 +146,7 @@ export async function cloneSamsarVideo(
   input: CloneVideoInput,
 ): Promise<CloneVideoResponse> {
   const user = await requireSessionUserRecord(request);
-  const client = getClient(await getSamsarApiKeyForUser(request, user));
+  const { client } = await getBaseVideoClient(request);
   const response = await client.cloneV2Video(input, {
     ...getV2RequestOptions(user),
   });
@@ -150,7 +158,7 @@ export async function regenerateSamsarVideoAvatar(
   input: CloneVideoInput,
 ): Promise<CloneVideoResponse> {
   const user = await requireSessionUserRecord(request);
-  const client = getClient(await getSamsarApiKeyForUser(request, user));
+  const { client } = await getBaseVideoClient(request);
   const response = await client.postV2<CloneVideoResponse>("video/regenerate_avatar", {
     input,
   }, {
@@ -164,7 +172,7 @@ export async function updateSamsarVideoFooter(
   input: UpdateVideoFooterImageInput,
 ): Promise<UpdateVideoFooterImageResponse> {
   const user = await requireSessionUserRecord(request);
-  const client = getClient(await getSamsarApiKeyForUser(request, user));
+  const { client } = await getBaseVideoClient(request);
   const response = await client.updateV2VideoFooterImage(input, {
     ...getV2RequestOptions(user),
   });
@@ -176,7 +184,7 @@ export async function joinSamsarVideos(
   input: JoinVideosInput,
 ): Promise<JoinVideosResponse> {
   const user = await requireSessionUserRecord(request);
-  const client = getClient(await getSamsarApiKeyForUser(request, user));
+  const { client } = await getBaseVideoClient(request);
   let response;
   try {
     response = await client.postV2<JoinVideosResponse>("join_videos", {
@@ -199,11 +207,7 @@ export async function processNextSamsarStep(
   requestId: string,
 ): Promise<V2StepVideoStatusResponse> {
   const user = await requireSessionUserRecord(request);
-  const keys = await getRuntimeKeys(request);
-  if (!keys.samsarApiKey && !user.externalApiKey) {
-    throw apiError("Samsar API key is not configured.", 412);
-  }
-  const client = getClient(await getSamsarApiKeyForUser(request, user));
+  const { client } = await getBaseVideoClient(request);
   const response = await client.processNextV2StepVideo(requestId, {
     ...getV2RequestOptions(user),
   });

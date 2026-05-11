@@ -1883,6 +1883,7 @@ export default function FlashReelsApp() {
       const data = await readApi<ApiRecord>("/api/samsar/step/start", {
         method: "POST",
         body: JSON.stringify(payload),
+        timeoutMs: 70000,
       });
       const nextRequestId = getRequestId(data);
       if (!nextRequestId) {
