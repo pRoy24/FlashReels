@@ -3,6 +3,7 @@ import SamsarClient, {
   type ExternalCreditsRechargeResponse,
   type ExternalRequestSummary,
   type ExternalUserIdentity,
+  type ExternalUserSessionResponse,
   type ExternalUserSummary,
 } from "samsar-js";
 
@@ -161,19 +162,28 @@ function summarizeRequest(request: ExternalRequestSummary) {
 
 export async function getExternalBillingDashboard(request: Request) {
   const user = await requireSessionUserRecord(request);
-  const provisionedUser = await ensureExternalUserProvisioned(request, user);
+  let provisionedUser = await ensureExternalUserProvisioned(request, user);
   const client = await getBaseClient(request);
   const externalUser = buildFlashReelsExternalUser(provisionedUser);
-  const [balanceResult, requestsResult] = await Promise.allSettled([
-    client.getExternalCreditsBalance(externalUser),
+  const [sessionResult, requestsResult] = await Promise.allSettled([
+    client.createExternalUserSession(externalUser),
     client.listExternalUserRequests(externalUser, { limit: DEFAULT_AUDIT_LIMIT }),
   ]);
 
-  if (balanceResult.status === "rejected") {
-    throw balanceResult.reason;
+  if (sessionResult.status === "rejected") {
+    throw sessionResult.reason;
   }
 
-  const balance = balanceResult.value.data as ExternalCreditsBalanceResponse;
+  const balance = sessionResult.value.data as ExternalUserSessionResponse | ExternalCreditsBalanceResponse;
+  const externalApiKey = normalizeString((balance as ExternalUserSessionResponse).external_api_key);
+  if (provisionedUser.role !== "admin" && externalApiKey && externalApiKey !== provisionedUser.externalApiKey) {
+    await saveExternalApiKey(provisionedUser.id, externalApiKey);
+    provisionedUser = {
+      ...provisionedUser,
+      externalApiKey,
+      externalApiKeyCreatedAt: provisionedUser.externalApiKeyCreatedAt || nowIso(),
+    };
+  }
   const requestData = requestsResult.status === "fulfilled" ? requestsResult.value.data : null;
   const externalSummary = summarizeExternalUser(
     balance.external_user || balance.externalUser || requestData?.external_user || requestData?.externalUser,

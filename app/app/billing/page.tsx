@@ -68,6 +68,16 @@ interface RechargeResponse {
   amountUsd: number;
 }
 
+class ApiRequestError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiRequestError";
+    this.status = status;
+  }
+}
+
 async function readApi<T>(url: string, init?: RequestInit) {
   const response = await fetch(url, {
     ...init,
@@ -78,7 +88,7 @@ async function readApi<T>(url: string, init?: RequestInit) {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(data?.message || "Request failed");
+    throw new ApiRequestError(data?.message || "Request failed", response.status);
   }
   return data as T;
 }
@@ -115,6 +125,7 @@ export default function BillingPage() {
   const [loading, setLoading] = useState(true);
   const [recharging, setRecharging] = useState(false);
   const [error, setError] = useState("");
+  const [authRequired, setAuthRequired] = useState(false);
 
   const externalUser = dashboard?.billing.externalUser || null;
   const lastTopUp = dashboard?.billing.lastTopUp || null;
@@ -128,11 +139,13 @@ export default function BillingPage() {
   async function loadDashboard() {
     setLoading(true);
     setError("");
+    setAuthRequired(false);
     try {
       const data = await readApi<BillingDashboard>("/api/billing");
       setDashboard(data);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Unable to load billing.");
+      setAuthRequired(loadError instanceof ApiRequestError && loadError.status === 401);
     } finally {
       setLoading(false);
     }
@@ -141,6 +154,7 @@ export default function BillingPage() {
   async function startRecharge() {
     setRecharging(true);
     setError("");
+    setAuthRequired(false);
     try {
       const data = await readApi<RechargeResponse>("/api/billing/recharge", {
         method: "POST",
@@ -149,6 +163,7 @@ export default function BillingPage() {
       window.location.assign(data.url);
     } catch (rechargeError) {
       setError(rechargeError instanceof Error ? rechargeError.message : "Unable to start recharge.");
+      setAuthRequired(rechargeError instanceof ApiRequestError && rechargeError.status === 401);
       setRecharging(false);
     }
   }
@@ -203,14 +218,24 @@ export default function BillingPage() {
           <section className="billingPanel">
             <div className="billingPanelHeader">
               <div>
-                <h2>Login required</h2>
-                <p>Sign in to FlashReels before viewing external-user credits and Stripe recharge history.</p>
+                <h2>{authRequired ? "Login required" : "Billing unavailable"}</h2>
+                <p>
+                  {authRequired
+                    ? "Sign in to FlashReels before viewing external-user credits and Stripe recharge history."
+                    : "FlashReels could not load the external-user billing dashboard."}
+                </p>
               </div>
               <WalletCards size={20} />
             </div>
-            <Link className="primaryButton" href="/app">
-              Go to login
-            </Link>
+            {authRequired ? (
+              <Link className="primaryButton" href="/app">
+                Go to login
+              </Link>
+            ) : (
+              <button className="primaryButton" type="button" onClick={loadDashboard}>
+                Retry
+              </button>
+            )}
           </section>
         ) : (
           <>
