@@ -9,8 +9,8 @@ const DATA_DIR = path.join(process.cwd(), ".flashreels");
 let redis: Redis | null | undefined;
 
 function getRedisConfig() {
-  const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL || "";
-  const token = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN || "";
+  const url = (process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL || "").trim();
+  const token = (process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN || "").trim();
   if (!url || !token) {
     return null;
   }
@@ -82,18 +82,18 @@ export function getPersistenceStatus() {
     reason: config
       ? "Secrets and library data are stored in Redis."
       : vercel
-        ? "Connect Vercel Redis/Upstash Redis, or set FLASHREELS_SAMSAR_API_KEY as a Vercel environment variable."
+        ? "Connect Vercel Redis/Upstash Redis and redeploy, or set FLASHREELS_SAMSAR_API_KEY as a Vercel environment variable."
         : "Secrets and library data are stored in the local .flashreels directory.",
     redisEnv: {
-      url: process.env.KV_REST_API_URL
-        ? "KV_REST_API_URL"
-        : process.env.UPSTASH_REDIS_REST_URL
-          ? "UPSTASH_REDIS_REST_URL"
+      url: process.env.UPSTASH_REDIS_REST_URL
+        ? "UPSTASH_REDIS_REST_URL"
+        : process.env.KV_REST_API_URL
+          ? "KV_REST_API_URL"
           : "",
-      token: process.env.KV_REST_API_TOKEN
-        ? "KV_REST_API_TOKEN"
-        : process.env.UPSTASH_REDIS_REST_TOKEN
-          ? "UPSTASH_REDIS_REST_TOKEN"
+      token: process.env.UPSTASH_REDIS_REST_TOKEN
+        ? "UPSTASH_REDIS_REST_TOKEN"
+        : process.env.KV_REST_API_TOKEN
+          ? "KV_REST_API_TOKEN"
           : "",
     },
   };

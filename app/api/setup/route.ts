@@ -19,17 +19,7 @@ export async function POST(request: Request) {
     const payload = await readJson<Record<string, unknown>>(request);
     if (payload.samsarApiKey || payload.runwayApiKey || payload.serverSecret) {
       const result = await saveRuntimeKeys(payload, request);
-      const response = NextResponse.json(result.status);
-      if (result.cookie) {
-        response.cookies.set(result.cookie.name, result.cookie.value, {
-          httpOnly: true,
-          sameSite: "lax",
-          secure: process.env.NODE_ENV === "production",
-          path: "/",
-          maxAge: result.cookie.maxAge,
-        });
-      }
-      return response;
+      return NextResponse.json(result.status);
     }
     return NextResponse.json(await getSetupStatus(request));
   } catch (error) {

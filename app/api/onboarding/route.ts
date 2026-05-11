@@ -36,17 +36,7 @@ export async function POST(request: Request) {
 
     if (step === "keys") {
       const result = await saveRuntimeKeys(payload, request);
-      const response = NextResponse.json({ setup: result.status });
-      if (result.cookie) {
-        response.cookies.set(result.cookie.name, result.cookie.value, {
-          httpOnly: true,
-          sameSite: "lax",
-          secure: process.env.NODE_ENV === "production",
-          path: "/",
-          maxAge: result.cookie.maxAge,
-        });
-      }
-      return response;
+      return NextResponse.json({ setup: result.status });
     }
 
     if (step === "admin") {

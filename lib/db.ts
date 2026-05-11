@@ -82,10 +82,16 @@ function normalizeDb(parsed: Partial<FlashReelsDatabase>): FlashReelsDatabase {
     ...(Array.isArray(parsed.whitelistEmails) ? parsed.whitelistEmails.map(normalizeEmail) : []),
     ...seededWhitelist,
   ].filter(Boolean)));
+  const users = Array.isArray(parsed.users)
+    ? parsed.users.map((user, index) => ({
+      ...user,
+      role: user.role || (index === 0 ? "admin" : "user"),
+    }))
+    : [];
 
   return {
     version: 1,
-    users: Array.isArray(parsed.users) ? parsed.users : [],
+    users,
     videos: Array.isArray(parsed.videos) ? parsed.videos : [],
     whitelistEmails,
   };
