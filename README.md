@@ -26,10 +26,29 @@ Prompts, reference images, generated frames, and generated videos move through t
 
 ```bash
 npm install
-npm run dev -- --local
+npm run dev
 ```
 
-Local development requires `--local`. The dev script opens a temporary public callback tunnel and passes that URL to the app as `FLASHREELS_PUBLIC_BASE_URL`; without it, Samsar cannot reach the custom Runway adapter endpoints running on your machine.
+The default dev command starts a local Next.js server without a public callback tunnel.
+
+To start with local tunneling, use:
+
+```bash
+npm run dev:local
+```
+
+The tunnel command opens a temporary public callback URL and passes that URL to the app as `FLASHREELS_PUBLIC_BASE_URL`; without it, Samsar cannot reach the custom Runway adapter endpoints running on your machine.
+
+The local dev server defaults to port `3000`. To use another port, pass it explicitly:
+
+```bash
+npm run dev -- --port 3010
+npm run dev:local -- --port 3010
+```
+
+You can also set `FLASHREELS_DEV_PORT` in `.env.local` for a project-local override.
+
+If Next.js reports that another dev server is already running, stop the listed PID before restarting on a different port.
 
 Register or sign in, then configure keys and the server secret in the authenticated startup wizard or through environment variables:
 

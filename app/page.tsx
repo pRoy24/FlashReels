@@ -1,25 +1,30 @@
 import Link from "next/link";
-import { ArrowRight, Film, ShieldCheck } from "lucide-react";
+import { ArrowRight, Boxes, Film, ShieldCheck, Sparkles } from "lucide-react";
+
+import { LandingVideoReel } from "@/app/LandingVideoReel";
+import { listPublishedFeedItems } from "@/lib/feed";
 
 const sections = [
   {
     title: "Step-aware rendering",
-    body: "Placeholder text for the guided production flow. This area will describe how creators inspect each generation stage before committing to the next one.",
+    body: "Inspect every generation stage, lock the frames that work, and move forward without losing creative control.",
   },
   {
     title: "RunwayML generation",
-    body: "Placeholder text for RunwayML image and video generation, completion polling, and preview-ready output URLs.",
+    body: "Generate preview-ready motion from curated image lists with completion polling and clean output URLs.",
   },
   {
     title: "Private render library",
-    body: "Placeholder text for accounts, saved videos, workspace history, and persistent project storage.",
+    body: "Keep completed reels, workspace history, and published feed state tied to the current creator account.",
   },
 ];
 
-export default function LandingPage() {
+export default async function LandingPage() {
+  const publishedVideos = await listPublishedFeedItems();
+
   return (
     <main className="landingShell">
-      <section className="landingHero" aria-labelledby="hero-title">
+      <section className="landingHero" id="top" aria-labelledby="hero-title">
         <nav className="landingNav">
           <div className="brandMark">
             <Film size={18} />
@@ -31,7 +36,7 @@ export default function LandingPage() {
               <ArrowRight size={16} />
             </Link>
             <Link className="navButton" href="/app">
-              App
+              Enter App
             </Link>
           </div>
         </nav>
@@ -42,15 +47,15 @@ export default function LandingPage() {
             <h1 id="hero-title">FlashReels</h1>
             <p>
               A focused, step-controlled image-list-to-video workspace powered by RunwayML generation.
-              Watch published reels first, then enter the editor only from a permitted whitelisted address.
+              Build the reel, publish the strongest result, then let the landing page become the playback surface.
             </p>
             <div className="heroActions">
-              <Link className="primaryAction heroPrimaryAction" href="/feed">
+              <Link className="primaryAction heroPrimaryAction" href="#published-reels">
                 <Film size={17} />
-                View Public Feed
+                Watch Reels
               </Link>
               <Link className="secondaryAction appAccessAction" href="/app">
-                Access App
+                Enter App
               </Link>
             </div>
           </div>
@@ -68,19 +73,38 @@ export default function LandingPage() {
             </div>
           </div>
         </div>
+        <a className="landingScrollCue" href="#workflow" aria-label="Scroll to workflow section">
+          <span />
+        </a>
       </section>
 
-      <section className="landingBand">
+      <section className="landingBand" id="workflow" aria-labelledby="workflow-title">
+        <div className="workflowIntro">
+          <p className="eyebrow">Production loop</p>
+          <h2 id="workflow-title">Render, review, publish, replay.</h2>
+          <p>
+            The landing experience now moves like the app: quick decision surfaces first, then a direct handoff
+            into published playback on the next scroll.
+          </p>
+        </div>
         <div className="sectionGrid">
-          {sections.map((section) => (
-            <article className="sectionCard" key={section.title}>
-              <ShieldCheck size={19} />
-              <h2>{section.title}</h2>
-              <p>{section.body}</p>
-            </article>
-          ))}
+          {sections.map((section, index) => {
+            const Icon = index === 0 ? Sparkles : index === 1 ? Boxes : ShieldCheck;
+            return (
+              <article className="sectionCard" key={section.title}>
+                <Icon size={20} />
+                <h3>{section.title}</h3>
+                <p>{section.body}</p>
+              </article>
+            );
+          })}
+        </div>
+        <div className="workflowVisual" aria-hidden="true">
+          <img src="/assets/flashreels-video-section-screenshot.png" alt="" />
         </div>
       </section>
+
+      <LandingVideoReel items={publishedVideos} />
     </main>
   );
 }

@@ -177,9 +177,6 @@ export async function getRuntimeKeys() {
   const samsarApiKey = samsarEnv.value || decrypt(store.keys.samsarApiKey);
   const runwayApiKey = runwayEnv.value || decrypt(store.keys.runwayApiKey);
   const serverSecret = serverSecretEnv.value || decrypt(store.keys.serverSecret);
-  if (serverSecret) {
-    validateServerSecret(serverSecret);
-  }
 
   return {
     samsarApiKey,
@@ -197,12 +194,6 @@ export async function requireRuntimeKeys() {
   const keys = await getRuntimeKeys();
   if (!keys.samsarApiKey) {
     throw apiError("Samsar API key is not configured.", 412);
-  }
-  if (!keys.runwayApiKey) {
-    throw apiError("RunwayML API key is not configured.", 412);
-  }
-  if (!keys.serverSecret) {
-    throw apiError("Server secret is not configured.", 412);
   }
   return keys;
 }
@@ -224,7 +215,7 @@ export async function getSetupStatus() {
     persistence: getPersistenceStatus(),
     envFile: getLocalEnvFileStatus(),
     publicBaseUrl: getConfiguredPublicBaseUrl(),
-    ready: Boolean(keys.samsarApiKey && keys.runwayApiKey && keys.serverSecret),
+    ready: Boolean(keys.samsarApiKey),
   };
 }
 

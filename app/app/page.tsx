@@ -23,8 +23,10 @@ import {
   RefreshCcw,
   Save,
   Share2,
+  Settings2,
   Trash2,
   Volume2,
+  X,
 } from "lucide-react";
 
 import { CreatorWizard } from "@/components/CreatorWizard";
@@ -85,6 +87,17 @@ interface LibraryVideo {
   updatedAt?: string;
 }
 
+interface PublishedFeedItem {
+  id: string;
+  slug: string;
+  title: string;
+  description: string;
+  videoUrl: string;
+  posterUrl: string;
+  authorName: string;
+  publishedAt: string;
+}
+
 const STAGE_ORDER = [
   "prompt_generation",
   "image_generation",
@@ -135,6 +148,26 @@ const LANGUAGE_OPTIONS = [
 
 function buildDetailedStatusUrl(requestId: string) {
   return `/api/samsar/step/status-detailed?request_id=${encodeURIComponent(requestId)}`;
+}
+
+function buildPublishedStatus(item: PublishedFeedItem | null): ApiRecord | null {
+  if (!item) {
+    return null;
+  }
+  return {
+    request_id: `published:${item.id}`,
+    status: "COMPLETED",
+    session: {
+      title: item.title,
+      description: item.description,
+      currentStage: "video_generation",
+      completedStages: ["video_generation"],
+      duration: 1,
+      result: {
+        url: item.videoUrl,
+      },
+    },
+  };
 }
 
 interface StagePreviewResource {
@@ -220,6 +253,13 @@ function getRequestId(data: ApiRecord | null) {
 
 function getStatusText(status: ApiRecord | null) {
   return firstString(status?.step_status, status?.status, getRecord(status?.step).status) || "IDLE";
+}
+
+function getEffectiveStatusText(status: ApiRecord | null) {
+  if (getFinalVideoUrl(status)) {
+    return "COMPLETED";
+  }
+  return getStatusText(status);
 }
 
 function getFinalVideoUrl(status: ApiRecord | null) {
@@ -324,7 +364,7 @@ function getDetailedSession(status: ApiRecord | null) {
 }
 
 function getLibraryStatus(video: LibraryVideo) {
-  return firstString(video.status, getStatusText(getRecord(video.metadata?.stepStatus))) || "PENDING";
+  return firstString(video.status, getEffectiveStatusText(getRecord(video.metadata?.stepStatus))) || "PENDING";
 }
 
 function getLibraryRequestId(video: LibraryVideo) {
@@ -381,15 +421,124 @@ function resolveResourceKind(kind: unknown, url: string): StagePreviewResource["
 }
 
 function getLayerWindow(layer: ApiRecord, sessionDuration: number) {
-  const startTime = Math.max(0, getNumber(layer.startTime, 0));
+  const startTime = Math.max(0, getNumber(layer.startTime ?? layer.start_time ?? layer.duration_offset, 0));
   const duration = getNumber(layer.duration, 0);
-  const explicitEnd = getNumber(layer.endTime, 0);
+  const explicitEnd = getNumber(layer.endTime ?? layer.end_time, 0);
   const endTime = explicitEnd > startTime
     ? explicitEnd
     : duration > 0
       ? startTime + duration
       : Math.max(startTime + 1, sessionDuration || startTime + 1);
   return { startTime, endTime };
+}
+
+function addStepResourceBlocks(
+  status: ApiRecord | null,
+  addResource: (resource: Omit<StagePreviewResource, "id"> & { id?: string }) => void,
+) {
+  const session = getDetailedSession(status);
+  const sessionDuration = Math.max(0, getNumber(session.duration, 0));
+  const sessionLayers = Array.isArray(session.layers) ? session.layers.map(getRecord) : [];
+  const completedBlocks = getRecord(status?.completed_step_resources);
+  const currentBlock = getRecord(status?.current_step_resources);
+  const blocks = [
+    ...Object.values(completedBlocks).map(getRecord),
+    ...(Object.keys(currentBlock).length > 0 ? [currentBlock] : []),
+  ];
+
+  function layerWindowFor(index: number, fallback: ApiRecord) {
+    return getLayerWindow(sessionLayers[index] || fallback, sessionDuration);
+  }
+
+  blocks.forEach((block) => {
+    const stage = firstString(block.step);
+    const blockStatus = firstString(block.status);
+    const resources = getRecord(block.resources);
+    if (!stage || !Object.keys(resources).length) {
+      return;
+    }
+
+    if (stage === "image_generation" && Array.isArray(resources.layers)) {
+      resources.layers.map(getRecord).forEach((layer, index) => {
+        const url = firstString(layer.selected_image_url, layer.selectedImageUrl);
+        if (!url) {
+          return;
+        }
+        const { startTime, endTime } = layerWindowFor(getNumber(layer.index, index), layer);
+        addResource({
+          id: `step-${stage}-${getNumber(layer.index, index)}-image`,
+          label: `Scene ${getNumber(layer.index, index) + 1} Image`,
+          stage,
+          kind: "image",
+          url,
+          status: firstString(layer.generation_status, layer.status, blockStatus),
+          startTime,
+          endTime,
+          prompt: firstString(layer.prompt),
+        });
+      });
+    }
+
+    if (stage === "ai_video_generation" && Array.isArray(resources.layers)) {
+      resources.layers.map(getRecord).forEach((layer, index) => {
+        const url = firstString(layer.ai_video_url, layer.aiVideoUrl);
+        if (!url) {
+          return;
+        }
+        const { startTime, endTime } = layerWindowFor(getNumber(layer.index, index), layer);
+        addResource({
+          id: `step-${stage}-${getNumber(layer.index, index)}-video`,
+          label: `Scene ${getNumber(layer.index, index) + 1} Motion`,
+          stage,
+          kind: "video",
+          url,
+          status: firstString(layer.status, blockStatus),
+          startTime,
+          endTime,
+          prompt: firstString(layer.prompt),
+        });
+      });
+    }
+
+    const audioLayers = stage === "speech_generation" ? resources.speech_layers : resources.music_layers;
+    if ((stage === "speech_generation" || stage === "music_generation") && Array.isArray(audioLayers)) {
+      audioLayers.map(getRecord).forEach((layer, index) => {
+        const url = firstString(layer.selected_audio_url, layer.selectedAudioUrl);
+        if (!url) {
+          return;
+        }
+        const { startTime, endTime } = getLayerWindow(layer, sessionDuration);
+        addResource({
+          id: `step-${stage}-${getNumber(layer.index, index)}-audio`,
+          label: `${stage === "speech_generation" ? "Speech" : "Music"} ${getNumber(layer.index, index) + 1}`,
+          stage,
+          kind: "audio",
+          url,
+          status: firstString(layer.generation_status, layer.status, blockStatus),
+          startTime,
+          endTime,
+          prompt: firstString(layer.prompt, layer.lyrics, layer.speaker_character_name),
+        });
+      });
+    }
+
+    if (stage === "video_generation") {
+      const url = firstString(resources.result_url, resources.remote_url, resources.video_link, resources.videoLink);
+      if (!url) {
+        return;
+      }
+      addResource({
+        id: "step-final-result",
+        label: "Final render",
+        stage,
+        kind: "video",
+        url,
+        status: firstString(blockStatus, "COMPLETED"),
+        startTime: 0,
+        endTime: sessionDuration || 1,
+      });
+    }
+  });
 }
 
 function collectPreviewResources(status: ApiRecord | null): StagePreviewResource[] {
@@ -509,6 +658,8 @@ function collectPreviewResources(status: ApiRecord | null): StagePreviewResource
     });
   });
 
+  addStepResourceBlocks(status, addResource);
+
   const resultUrl = getFinalVideoUrl(status);
   if (resultUrl) {
     addResource({
@@ -583,6 +734,7 @@ function SetupWizard({
   const [serverSecret, setServerSecret] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   async function submit() {
     setSaving(true);
@@ -616,33 +768,18 @@ function SetupWizard({
           <div>
             <p className="eyebrow">Startup wizard</p>
             <h1>Connect FlashReels</h1>
+            <p className="setupLead">Add your Samsar.one API key to start creating reels.</p>
           </div>
           <KeyRound size={24} />
         </div>
 
         <div className="setupStatusGrid">
-          <StatusPill ready={Boolean(setup?.runwayConfigured)} label="RunwayML API key" source={setup?.runwaySource} />
           <StatusPill ready={Boolean(setup?.samsarConfigured)} label="Samsar API key" source={setup?.samsarSource} />
-          <StatusPill ready={Boolean(setup?.serverSecretConfigured)} label="Server secret" source={setup?.serverSecretSource} />
           <StatusPill ready={secretStorage.ready} label="Secret storage" source={secretStorage.source} />
-          <StatusPill
-            ready={Boolean(setup?.publicBaseUrl)}
-            label={setup?.publicBaseUrl ? "Public callbacks" : "Instance callbacks"}
-            source={setup?.publicBaseUrl || "request origin"}
-          />
         </div>
 
-        <label>
-          <span>RunwayML API key</span>
-          <input
-            type="password"
-            value={runwayApiKey}
-            onChange={(event) => setRunwayApiKey(event.target.value)}
-            placeholder={setup?.runwayConfigured ? "Configured" : "Paste key"}
-          />
-        </label>
-        <label>
-          <span>Samsar.one API key</span>
+        <label className="requiredField">
+          <span>Samsar.one API key <small>Required</small></span>
           <input
             type="password"
             value={samsarApiKey}
@@ -650,15 +787,47 @@ function SetupWizard({
             placeholder={setup?.samsarConfigured ? "Configured" : "Paste key"}
           />
         </label>
-        <label>
-          <span>Server secret</span>
-          <input
-            type="password"
-            value={serverSecret}
-            onChange={(event) => setServerSecret(event.target.value)}
-            placeholder={setup?.serverSecretConfigured ? "Configured" : "24+ chars, mixed character types"}
-          />
-        </label>
+
+        <div className="advancedSetup">
+          <button className="advancedSetupToggle" onClick={() => setAdvancedOpen((open) => !open)} type="button">
+            <Settings2 size={16} />
+            <span>Advanced</span>
+            <small>Optional</small>
+          </button>
+
+          {advancedOpen ? (
+            <div className="advancedSetupBody">
+              <div className="setupStatusGrid compactStatusGrid">
+                <StatusPill ready={Boolean(setup?.runwayConfigured)} label="RunwayML API key" source={setup?.runwaySource} />
+                <StatusPill ready={Boolean(setup?.serverSecretConfigured)} label="Server secret" source={setup?.serverSecretSource} />
+                <StatusPill
+                  ready={Boolean(setup?.publicBaseUrl)}
+                  label={setup?.publicBaseUrl ? "Public callbacks" : "Instance callbacks"}
+                  source={setup?.publicBaseUrl || "request origin"}
+                />
+              </div>
+
+              <label>
+                <span>RunwayML API key</span>
+                <input
+                  type="password"
+                  value={runwayApiKey}
+                  onChange={(event) => setRunwayApiKey(event.target.value)}
+                  placeholder={setup?.runwayConfigured ? "Configured" : "Paste key"}
+                />
+              </label>
+              <label>
+                <span>Server secret</span>
+                <input
+                  type="password"
+                  value={serverSecret}
+                  onChange={(event) => setServerSecret(event.target.value)}
+                  placeholder={setup?.serverSecretConfigured ? "Configured" : "24+ chars, mixed character types"}
+                />
+              </label>
+            </div>
+          ) : null}
+        </div>
 
         {error ? <div className="errorBox">{error}</div> : null}
 
@@ -700,13 +869,28 @@ function getSecretStorageStatus(setup: SetupStatus | null) {
   };
 }
 
-function AuthGate({ onAuth }: { onAuth: (user: User) => void }) {
-  const [mode, setMode] = useState<"login" | "register">("register");
+function AuthGate({
+  initialMode = "register",
+  modal = false,
+  onAuth,
+  onCancel,
+}: {
+  initialMode?: "login" | "register";
+  modal?: boolean;
+  onAuth: (user: User) => void;
+  onCancel?: () => void;
+}) {
+  const [mode, setMode] = useState<"login" | "register">(initialMode);
   const [email, setEmail] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setMode(initialMode);
+    setError("");
+  }, [initialMode]);
 
   async function submit() {
     setBusy(true);
@@ -724,12 +908,19 @@ function AuthGate({ onAuth }: { onAuth: (user: User) => void }) {
     }
   }
 
-  return (
-    <section className="setupSurface">
+  const form = (
+    <section className={modal ? "authDialogSurface" : "setupSurface"}>
       <div className="setupPanel authPanel">
-        <div>
-          <p className="eyebrow">Account</p>
-          <h1>{mode === "register" ? "Create workspace" : "Sign in"}</h1>
+        <div className="authPanelHeader">
+          <div>
+            <p className="eyebrow">Account</p>
+            <h1>{mode === "register" ? "Create workspace" : "Sign in"}</h1>
+          </div>
+          {onCancel ? (
+            <button className="iconButton" type="button" onClick={onCancel} aria-label="Close account dialog">
+              <X size={17} />
+            </button>
+          ) : null}
         </div>
         <div className="segmented">
           <button className={mode === "register" ? "active" : ""} onClick={() => setMode("register")}>
@@ -760,6 +951,16 @@ function AuthGate({ onAuth }: { onAuth: (user: User) => void }) {
         </button>
       </div>
     </section>
+  );
+
+  if (!modal) {
+    return form;
+  }
+
+  return (
+    <div className="authDialogBackdrop" role="dialog" aria-modal="true" aria-label="Login or register">
+      {form}
+    </div>
   );
 }
 
@@ -1017,7 +1218,7 @@ function StagedPreviewPanel({
   const autoPlayedFinalUrlRef = useRef("");
   const [isSequencePlaying, setIsSequencePlaying] = useState(false);
   const [playbackRequestId, setPlaybackRequestId] = useState(0);
-  const statusText = getStatusText(status).toUpperCase();
+  const statusText = getEffectiveStatusText(status).toUpperCase();
   const currentStage = firstString(session.currentStage, getRecord(status?.step).current_step, status?.current_step);
   const previewStage = firstString(session.previewStage);
   const completedStages = Array.isArray(session.completedStages) ? session.completedStages.map((stage) => getString(stage)).filter(Boolean) : [];
@@ -1261,26 +1462,32 @@ export default function FlashReelsApp() {
   const [currentFooterUrl, setCurrentFooterUrl] = useState("");
   const [currentJoinVideoId, setCurrentJoinVideoId] = useState("");
   const [currentActionBusy, setCurrentActionBusy] = useState("");
-  const statusText = getStatusText(status);
-  const finalVideoUrl = getFinalVideoUrl(status);
+  const [publishedItems, setPublishedItems] = useState<PublishedFeedItem[]>([]);
+  const [authDialogOpen, setAuthDialogOpen] = useState(false);
+  const [authDialogMode, setAuthDialogMode] = useState<"login" | "register">("register");
+  const latestPublishedItem = publishedItems[0] || null;
+  const publishedStatus = useMemo(() => buildPublishedStatus(latestPublishedItem), [latestPublishedItem]);
+  const displayStatus = user ? status : publishedStatus;
+  const statusText = getEffectiveStatusText(displayStatus);
+  const finalVideoUrl = getFinalVideoUrl(displayStatus);
   const currentSourceSessionId = firstString(getRequestId(status), requestId);
-  const step = getRecord(status?.step);
-  const waitingForNext = Boolean(step.waiting_for_process_next || status?.waiting_for_process_next);
+  const step = getRecord(displayStatus?.step);
+  const waitingForNext = Boolean(step.waiting_for_process_next || displayStatus?.waiting_for_process_next);
   const requiresUserAction = Boolean(
     step.requires_user_action ||
     step.requiresUserAction ||
-    status?.requires_user_action ||
-    status?.requiresUserAction,
+    displayStatus?.requires_user_action ||
+    displayStatus?.requiresUserAction,
   );
   const canProcessNext = Boolean(
     step.can_process_next ||
     step.canProcessNext ||
-    status?.can_process_next ||
-    status?.canProcessNext ||
+    displayStatus?.can_process_next ||
+    displayStatus?.canProcessNext ||
     requiresUserAction,
   );
-  const nextStep = firstString(step.next_step, status?.next_step);
-  const currentStep = firstString(step.current_step, status?.current_step);
+  const nextStep = firstString(step.next_step, displayStatus?.next_step);
+  const currentStep = firstString(step.current_step, displayStatus?.current_step);
   const currentStepLabel = currentStep ? formatStageLabel(currentStep) : "";
   const nextStepLabel = nextStep ? formatStageLabel(nextStep) : "";
   const hasProcessNextAction = Boolean(nextStep) && (waitingForNext || canProcessNext || requiresUserAction);
@@ -1290,12 +1497,12 @@ export default function FlashReelsApp() {
   const renderFinished = completedStatus && Boolean(finalVideoUrl);
   const canContinue = hasProcessNextAction && canProcessNext;
   const completedBlocks = useMemo(() => {
-    const completed = getRecord(status?.completed_step_resources);
+    const completed = getRecord(displayStatus?.completed_step_resources);
     return STAGE_ORDER
       .map((key) => getRecord(completed[key]))
       .filter((block) => Object.keys(block).length > 0);
-  }, [status]);
-  const previewResources = useMemo(() => collectPreviewResources(status), [status]);
+  }, [displayStatus]);
+  const previewResources = useMemo(() => collectPreviewResources(displayStatus), [displayStatus]);
   const finalPreviewResource = useMemo(() => (
     previewResources.find((resource) => resource.id === "final-result" && resource.kind === "video") || null
   ), [previewResources]);
@@ -1338,7 +1545,7 @@ export default function FlashReelsApp() {
 
     const sourceUrl = getSessionPreviewUrl(snapshotStatus);
     const title = firstString(snapshotPayload?.prompt, getDetailedSession(snapshotStatus).title, snapshotRequestId, "Untitled render");
-    const snapshotStatusText = getStatusText(snapshotStatus);
+    const snapshotStatusText = getEffectiveStatusText(snapshotStatus);
     const persistedStatus = snapshotStatusText === "IDLE" && snapshotRequestId ? "PENDING" : snapshotStatusText;
     const video = await readApi<{ video: LibraryVideo }>("/api/library", {
       method: "POST",
@@ -1399,6 +1606,11 @@ export default function FlashReelsApp() {
     return setupData;
   }, []);
 
+  function openAuthDialog(mode: "login" | "register" = "register") {
+    setAuthDialogMode(mode);
+    setAuthDialogOpen(true);
+  }
+
   useEffect(() => {
     async function boot() {
       try {
@@ -1406,6 +1618,9 @@ export default function FlashReelsApp() {
         setUser(authData.user);
         if (authData.user) {
           await loadSetup();
+        } else {
+          const feedData = await readApi<{ videos: PublishedFeedItem[] }>("/api/feed");
+          setPublishedItems(feedData.videos);
         }
       } catch (bootError) {
         setError(bootError instanceof Error ? bootError.message : "Unable to load FlashReels.");
@@ -1423,13 +1638,13 @@ export default function FlashReelsApp() {
   }, [loadLibrary, user]);
 
   useEffect(() => {
-    if (!requestId || terminal || canContinue || renderFinished) {
+    if (!requestId || terminal || renderFinished) {
       return;
     }
 
     const timeout = setTimeout(() => {
       pollStatus();
-    }, 5200);
+    }, canContinue ? 7000 : 5200);
     return () => clearTimeout(timeout);
   }, [canContinue, pollStatus, renderFinished, requestId, terminal]);
 
@@ -1803,10 +2018,13 @@ export default function FlashReelsApp() {
     setUser(null);
     setSetup(null);
     setLibrary([]);
+    const feedData = await readApi<{ videos: PublishedFeedItem[] }>("/api/feed");
+    setPublishedItems(feedData.videos);
   }
 
   async function handleAuth(nextUser: User) {
     setUser(nextUser);
+    setAuthDialogOpen(false);
     setError("");
     try {
       await loadSetup();
@@ -1823,11 +2041,7 @@ export default function FlashReelsApp() {
     );
   }
 
-  if (!user) {
-    return <AuthGate onAuth={handleAuth} />;
-  }
-
-  if (!setup?.ready) {
+  if (user && !setup?.ready) {
     return <SetupWizard setup={setup} onUpdated={setSetup} />;
   }
 
@@ -1846,21 +2060,40 @@ export default function FlashReelsApp() {
           <a className="feedNavPill" href="/feed" target="_blank" rel="noreferrer">
             Feed
           </a>
+          {!user ? (
+            <button className="feedNavPill" type="button" onClick={() => openAuthDialog("register")}>
+              Render
+            </button>
+          ) : null}
           <div className={`statusBadge status-${statusText.toLowerCase()}`}>
             {polling || activeStatus ? <Loader2 className="spin" size={16} /> : statusText.toUpperCase() === "COMPLETED" ? <Check size={16} /> : <CircleDashed size={16} />}
             {statusText}
           </div>
-          <div className="accountChip">
-            <strong>{user.displayName}</strong>
-            <span>{user.email}</span>
-          </div>
-          <button className="iconButton" onClick={logout} aria-label="Log out">
-            <LogOut size={17} />
-          </button>
+          {user ? (
+            <>
+              <div className="accountChip">
+                <strong>{user.displayName}</strong>
+                <span>{user.email}</span>
+              </div>
+              <button className="iconButton" onClick={logout} aria-label="Log out">
+                <LogOut size={17} />
+              </button>
+            </>
+          ) : (
+            <div className="authNavActions">
+              <button className="feedNavPill" type="button" onClick={() => openAuthDialog("login")}>
+                Login
+              </button>
+              <button className="feedNavPill primaryFeedNavPill" type="button" onClick={() => openAuthDialog("register")}>
+                Register
+              </button>
+            </div>
+          )}
         </div>
       </header>
-      <WhitelistPanel user={user} />
+      {user ? <WhitelistPanel user={user} /> : null}
 
+      {user ? (
       <div className={`appBody ${libraryOpen ? "libraryExpanded" : "libraryCollapsed"}`}>
         <section className="studio">
           <header className="studioTopbar">
@@ -2166,6 +2399,71 @@ export default function FlashReelsApp() {
         </div>
       </aside>
       </div>
+      ) : (
+        <div className="appBody readOnlyAppBody">
+          <section className="studio">
+            <header className="studioTopbar">
+              <div>
+                <p className="eyebrow">Read-only app session</p>
+                <h1>{latestPublishedItem ? latestPublishedItem.title : "No published render loaded"}</h1>
+              </div>
+              <button className="primaryButton topbarRenderButton" type="button" onClick={() => openAuthDialog("register")}>
+                <ArrowRight size={16} />
+                Render
+              </button>
+            </header>
+
+            {error ? <div className="errorBox">{error}</div> : null}
+
+            <section className="previewPanel readOnlyPreviewPanel">
+              <div className="previewHeader">
+                <div>
+                  <p className="eyebrow">Latest published render</p>
+                  <h2>{latestPublishedItem ? `published:${latestPublishedItem.slug}` : "Not available"}</h2>
+                  <span>{latestPublishedItem ? "Read-only playback" : "Published renders will appear here"}</span>
+                </div>
+                <div className="previewHeaderActions">
+                  {latestPublishedItem ? (
+                    <a className="feedNavPill" href={`/feed/${latestPublishedItem.slug}`} target="_blank" rel="noreferrer">
+                      Feed view
+                    </a>
+                  ) : null}
+                </div>
+              </div>
+
+              <StagedPreviewPanel
+                status={displayStatus}
+                resources={previewResources}
+                selectedResource={selectedResource}
+                timelineSeek={timelineSeek}
+                onTimelineSeek={setTimelineSeek}
+                onSelectResource={(resource) => setSelectedResourceId(resource.id)}
+              />
+
+              <div className="actionRow readOnlyActionRow">
+                <div className="approvalPanel ready">
+                  <div>
+                    <span>Viewing public render</span>
+                    <strong>Sign in or register to create and edit renders</strong>
+                  </div>
+                </div>
+                <button className="primaryButton" type="button" onClick={() => openAuthDialog("register")}>
+                  <ArrowRight size={16} />
+                  Render
+                </button>
+              </div>
+            </section>
+          </section>
+        </div>
+      )}
+      {authDialogOpen ? (
+        <AuthGate
+          initialMode={authDialogMode}
+          modal
+          onAuth={handleAuth}
+          onCancel={() => setAuthDialogOpen(false)}
+        />
+      ) : null}
     </main>
   );
 }

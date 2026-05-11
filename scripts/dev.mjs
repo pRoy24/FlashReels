@@ -1,37 +1,101 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
+import { promises as fs } from "node:fs";
 import process from "node:process";
+import nextEnv from "@next/env";
 
 const args = process.argv.slice(2);
-const localIndex = args.indexOf("--local");
+const DEFAULT_DEV_PORT = 3000;
+const { loadEnvConfig } = nextEnv;
 
-if (localIndex === -1) {
-  console.error("FlashReels local development requires a public callback tunnel.");
-  console.error("Start with: npm run dev -- --local");
+loadEnvConfig(process.cwd(), true);
+
+function hasLocalTunnelFlag(rawArgs) {
+  return rawArgs.some((arg) => arg === "--local" || arg === "--lical");
+}
+
+function removeLocalTunnelFlags(rawArgs) {
+  return rawArgs.filter((arg) => arg !== "--local" && arg !== "--lical");
+}
+
+function readPortAndForwardedArgs(rawArgs) {
+  let port = process.env.FLASHREELS_DEV_PORT || String(DEFAULT_DEV_PORT);
+  const forwardedArgs = [];
+
+  for (let index = 0; index < rawArgs.length; index += 1) {
+    const arg = rawArgs[index];
+
+    if ((arg === "--port" || arg === "-p") && rawArgs[index + 1]) {
+      port = rawArgs[index + 1];
+      index += 1;
+      continue;
+    }
+
+    if (arg.startsWith("--port=")) {
+      port = arg.slice("--port=".length);
+      continue;
+    }
+
+    if (arg.startsWith("-p=")) {
+      port = arg.slice("-p=".length);
+      continue;
+    }
+
+    forwardedArgs.push(arg);
+  }
+
+  return { port: Number(port), forwardedArgs };
+}
+
+function hasBundlerArg(rawArgs) {
+  return rawArgs.some((arg) => arg === "--webpack" || arg === "--turbo" || arg === "--turbopack");
+}
+
+const useLocalTunnel = hasLocalTunnelFlag(args);
+const { port, forwardedArgs } = readPortAndForwardedArgs(removeLocalTunnelFlags(args));
+if (!Number.isInteger(port) || port < 1 || port > 65535) {
+  console.error("Invalid dev server port.");
   process.exit(1);
 }
 
-args.splice(localIndex, 1);
+const bundlerArgs = hasBundlerArg(forwardedArgs) ? [] : ["--turbopack"];
 
-function readArg(name, alias, fallback) {
-  const longIndex = args.indexOf(name);
-  if (longIndex !== -1 && args[longIndex + 1]) {
-    return args[longIndex + 1];
+async function readActiveNextDevServer() {
+  let lock;
+  try {
+    lock = JSON.parse(await fs.readFile(".next/dev/lock", "utf8"));
+  } catch {
+    return undefined;
   }
 
-  const aliasIndex = args.indexOf(alias);
-  if (aliasIndex !== -1 && args[aliasIndex + 1]) {
-    return args[aliasIndex + 1];
+  if (!Number.isInteger(lock?.pid)) {
+    return undefined;
   }
 
-  const inline = args.find((arg) => arg.startsWith(`${name}=`));
-  return inline ? inline.slice(name.length + 1) : fallback;
+  try {
+    process.kill(lock.pid, 0);
+  } catch {
+    return undefined;
+  }
+
+  return lock;
 }
 
-const port = Number(readArg("--port", "-p", process.env.PORT || "3000"));
-if (!Number.isInteger(port) || port < 1 || port > 65535) {
-  console.error("Invalid dev server port.");
+async function assertNoActiveNextDevServer() {
+  const activeServer = await readActiveNextDevServer();
+  if (!activeServer) {
+    return;
+  }
+
+  const activeUrl = activeServer.appUrl || (
+    Number.isInteger(activeServer.port) ? `http://localhost:${activeServer.port}` : "unknown port"
+  );
+  console.error(`FlashReels dev server is already running at ${activeUrl} (PID ${activeServer.pid}).`);
+  if (activeServer.port !== port) {
+    console.error(`Stop that process before starting FlashReels on port ${port}.`);
+  }
+  console.error(`Run: kill ${activeServer.pid}`);
   process.exit(1);
 }
 
@@ -114,7 +178,9 @@ function startTunnelOnce() {
   return new Promise((resolve, reject) => {
     let settled = false;
     let stderrBuffer = "";
-    const timeout = setTimeout(() => reject(new Error("Timed out while starting the public callback tunnel.")), 30000);
+    const timeout = setTimeout(() => reject(new Error(
+      "Timed out while starting the public callback tunnel. Check that https://localtunnel.me is reachable from this network.",
+    )), 30000);
 
     function inspectOutput(chunk) {
       const text = chunk.toString();
@@ -184,13 +250,52 @@ async function restartDevServer(reason) {
   await startDevServer();
 }
 
+function startNextDevServer(publicUrl) {
+  if (publicUrl) {
+    console.log(`FlashReels public callback URL: ${publicUrl}`);
+  } else {
+    console.log("FlashReels dev server starting without a public callback tunnel.");
+  }
+
+  const nextArgs = ["next", "dev", ...bundlerArgs, "--port", String(port), ...forwardedArgs];
+  nextProcess = spawn("npx", nextArgs, {
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      ...(publicUrl
+        ? {
+            FLASHREELS_PUBLIC_BASE_URL: publicUrl,
+            FLASHREELS_LOCAL_TUNNEL: "1",
+          }
+        : {}),
+      PORT: String(port),
+    },
+  });
+
+  nextProcess.on("exit", async (code, signal) => {
+    if (shuttingDown || restarting) {
+      return;
+    }
+    shuttingDown = true;
+    await stopChild(tunnel);
+    if (signal) {
+      process.kill(process.pid, signal);
+      return;
+    }
+    process.exit(code ?? 0);
+  });
+}
+
 async function startDevServer() {
   try {
+    if (!useLocalTunnel) {
+      startNextDevServer();
+      return;
+    }
+
     const startedTunnel = await startTunnelWithRetry();
     tunnel = startedTunnel.process;
     const publicUrl = startedTunnel.publicUrl;
-
-    console.log(`FlashReels public callback URL: ${publicUrl}`);
 
     tunnel.on("exit", (code, signal) => {
       if (shuttingDown || restarting) {
@@ -199,33 +304,12 @@ async function startDevServer() {
       void restartDevServer(`FlashReels public callback tunnel closed with ${formatExit(code, signal)}.`);
     });
 
-    const nextArgs = ["next", "dev", "--webpack", "--port", String(port), ...args];
-    nextProcess = spawn("npx", nextArgs, {
-      stdio: "inherit",
-      env: {
-        ...process.env,
-        FLASHREELS_PUBLIC_BASE_URL: publicUrl,
-        FLASHREELS_LOCAL_TUNNEL: "1",
-        PORT: String(port),
-      },
-    });
-
-    nextProcess.on("exit", async (code, signal) => {
-      if (shuttingDown || restarting) {
-        return;
-      }
-      shuttingDown = true;
-      await stopChild(tunnel);
-      if (signal) {
-        process.kill(process.pid, signal);
-        return;
-      }
-      process.exit(code ?? 0);
-    });
+    startNextDevServer(publicUrl);
   } catch (error) {
     console.error(error instanceof Error ? error.message : "Unable to start FlashReels local tunnel.");
     await shutdown("SIGTERM", 1);
   }
 }
 
+await assertNoActiveNextDevServer();
 await startDevServer();

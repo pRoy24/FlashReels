@@ -75,7 +75,7 @@ export async function startSamsarStepVideo(request: Request, payload: StartPaylo
       normalizedPayload.manual_step_stages ||
       normalizedPayload.manualStepStages ||
       (shouldAutoRenderFullVideo(normalizedPayload) ? [] : DEFAULT_MANUAL_STEP_STAGES),
-    ...(shouldUseCustomAdapters()
+    ...(shouldUseCustomAdapters() && keys.runwayApiKey && keys.serverSecret
       ? { custom_adapters: buildCustomAdapters(request, keys.serverSecret) }
       : {}),
   };
