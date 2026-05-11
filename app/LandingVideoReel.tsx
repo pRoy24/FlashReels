@@ -27,6 +27,7 @@ type VideoProgress = {
 };
 
 const DEFAULT_LANDING_VOLUME = 0.7;
+const CLICK_PLAY_VOLUME = 0.5;
 const LANDING_VOLUME_STORAGE_KEY = "flashreels:landing-video-volume";
 
 function formatPublishedDate(value: string) {
@@ -53,11 +54,13 @@ function formatVideoTime(value: number | undefined) {
 
 export function LandingVideoReel({ items }: LandingVideoReelProps) {
   const [activeIndex, setActiveIndex] = useState(0);
-  const [playing, setPlaying] = useState(true);
-  const [muted, setMuted] = useState(false);
+  const [playing, setPlaying] = useState(false);
+  const [muted, setMuted] = useState(true);
+  const [sectionVisible, setSectionVisible] = useState(false);
   const [volume, setVolume] = useState(DEFAULT_LANDING_VOLUME);
   const [progress, setProgress] = useState<Record<string, VideoProgress>>({});
   const [volumeOpen, setVolumeOpen] = useState(false);
+  const sectionRef = useRef<HTMLElement | null>(null);
   const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
   const panelRefs = useRef<Record<string, HTMLElement | null>>({});
   const activeItem = items[activeIndex];
@@ -66,13 +69,32 @@ export function LandingVideoReel({ items }: LandingVideoReelProps) {
     ? (activeProgress.currentTime / activeProgress.duration) * 100
     : 0;
   const volumeProgress = muted ? 0 : Math.round(volume * 100);
+  const playControlLabel = playing && !muted && volume > 0 ? "Pause" : "Play";
   const itemIds = useMemo(() => items.map((item) => item.id).join("|"), [items]);
 
   useEffect(() => {
     const storedVolume = normalizeVolume(window.localStorage.getItem(LANDING_VOLUME_STORAGE_KEY));
     setVolume(storedVolume);
-    setMuted(storedVolume === 0);
   }, []);
+
+  useEffect(() => {
+    const node = sectionRef.current;
+    if (!node || items.length === 0) {
+      return undefined;
+    }
+
+    const observer = new IntersectionObserver(([entry]) => {
+      const visible = Boolean(entry?.isIntersecting && entry.intersectionRatio > 0);
+      setSectionVisible(visible);
+      setPlaying(visible);
+      if (!visible) {
+        setVolumeOpen(false);
+      }
+    }, { threshold: [0, 0.01] });
+
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [items.length]);
 
   useEffect(() => {
     if (items.length === 0) {
@@ -88,7 +110,7 @@ export function LandingVideoReel({ items }: LandingVideoReelProps) {
         const nextIndex = items.findIndex((item) => item.id === nextId);
         if (nextIndex >= 0) {
           setActiveIndex(nextIndex);
-          setPlaying(true);
+          setPlaying(sectionVisible);
           setVolumeOpen(false);
         }
       }
@@ -102,7 +124,7 @@ export function LandingVideoReel({ items }: LandingVideoReelProps) {
     }
 
     return () => observer.disconnect();
-  }, [itemIds, items]);
+  }, [itemIds, items, sectionVisible]);
 
   useEffect(() => {
     const currentId = activeItem?.id;
@@ -112,7 +134,7 @@ export function LandingVideoReel({ items }: LandingVideoReelProps) {
       }
       video.volume = volume;
       video.muted = muted || volume === 0;
-      if (id === currentId && playing) {
+      if (id === currentId && playing && sectionVisible) {
         if (video.ended) {
           video.currentTime = 0;
         }
@@ -121,7 +143,7 @@ export function LandingVideoReel({ items }: LandingVideoReelProps) {
         video.pause();
       }
     }
-  }, [activeItem?.id, itemIds, muted, playing, volume]);
+  }, [activeItem?.id, itemIds, muted, playing, sectionVisible, volume]);
 
   function selectItem(index: number) {
     if (items.length === 0) {
@@ -130,7 +152,7 @@ export function LandingVideoReel({ items }: LandingVideoReelProps) {
     const nextIndex = (index + items.length) % items.length;
     const nextItem = items[nextIndex];
     setActiveIndex(nextIndex);
-    setPlaying(true);
+    setPlaying(sectionVisible);
     setVolumeOpen(false);
     panelRefs.current[nextItem.id]?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
@@ -165,6 +187,42 @@ export function LandingVideoReel({ items }: LandingVideoReelProps) {
     }
     setPlaying(true);
     video?.play().catch(() => setPlaying(false));
+  }
+
+  function playAudibleFromClick() {
+    if (!activeItem) {
+      return;
+    }
+    const video = videoRefs.current[activeItem.id];
+    const nextVolume = CLICK_PLAY_VOLUME;
+    window.localStorage.setItem(LANDING_VOLUME_STORAGE_KEY, String(nextVolume));
+    setVolume(nextVolume);
+    setMuted(false);
+    setPlaying(true);
+    if (video?.ended) {
+      video.currentTime = 0;
+    }
+    if (video) {
+      video.volume = nextVolume;
+      video.muted = false;
+    }
+    video?.play().catch(() => setPlaying(false));
+  }
+
+  function handleVideoClick() {
+    if (!playing || muted || volume === 0) {
+      playAudibleFromClick();
+      return;
+    }
+    togglePlay();
+  }
+
+  function handlePlayButtonClick() {
+    if (playing && !muted && volume > 0) {
+      togglePlay();
+      return;
+    }
+    playAudibleFromClick();
   }
 
   function toggleMuted() {
@@ -218,7 +276,7 @@ export function LandingVideoReel({ items }: LandingVideoReelProps) {
   }
 
   return (
-    <section className="landingVideoReel" id="published-reels" aria-label="Published FlashReels">
+    <section className="landingVideoReel" id="published-reels" aria-label="Published FlashReels" ref={sectionRef}>
       {items.length === 0 ? (
         <div className="landingVideoEmpty">
           <Film size={32} />
@@ -243,7 +301,7 @@ export function LandingVideoReel({ items }: LandingVideoReelProps) {
               <video
                 src={item.videoUrl}
                 poster={item.posterUrl || undefined}
-                autoPlay={index === activeIndex && playing}
+                autoPlay={index === activeIndex && playing && sectionVisible}
                 muted={muted || volume === 0}
                 loop={false}
                 playsInline
@@ -251,7 +309,7 @@ export function LandingVideoReel({ items }: LandingVideoReelProps) {
                 ref={(node) => {
                   videoRefs.current[item.id] = node;
                 }}
-                onClick={togglePlay}
+                onClick={handleVideoClick}
                 onDurationChange={(event) => updateProgress(item.id, event.currentTarget)}
                 onEnded={() => handleEnded(index)}
                 onLoadedMetadata={(event) => updateProgress(item.id, event.currentTarget)}
@@ -301,8 +359,8 @@ export function LandingVideoReel({ items }: LandingVideoReelProps) {
               <button type="button" onClick={() => selectItem(activeIndex - 1)} title="Previous video" aria-label="Previous video">
                 <ChevronUp size={19} />
               </button>
-              <button type="button" onClick={togglePlay} title={playing ? "Pause" : "Play"} aria-label={playing ? "Pause" : "Play"}>
-                {playing ? <Pause size={19} /> : <Play size={19} />}
+              <button type="button" onClick={handlePlayButtonClick} title={playControlLabel} aria-label={playControlLabel}>
+                {playControlLabel === "Pause" ? <Pause size={19} /> : <Play size={19} />}
               </button>
               <div className={`landingVideoVolume ${volumeOpen ? "open" : ""}`}>
                 <button
