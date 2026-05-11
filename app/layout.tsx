@@ -8,6 +8,9 @@ export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: "FlashReels",
   description: "Step-controlled generative video editor powered by RunwayML.",
+  icons: {
+    icon: "/icon.svg",
+  },
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
