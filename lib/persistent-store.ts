@@ -67,7 +67,7 @@ export async function writePersistentJson<T>(key: string, fileName: string, valu
     return;
   }
   if (isVercelDeployment()) {
-    throw apiError("Persistent storage is not configured. Add Vercel KV or Upstash Redis REST variables before saving setup.", 412);
+    throw apiError("Persistent storage is not configured. Connect Vercel Redis/Upstash Redis for this project, or set FLASHREELS_SAMSAR_API_KEY directly in Vercel environment variables.", 412);
   }
   await writeLocalJson(fileName, value);
 }
@@ -82,7 +82,7 @@ export function getPersistenceStatus() {
     reason: config
       ? "Secrets and library data are stored in Redis."
       : vercel
-        ? "Configure Vercel KV or Upstash Redis for durable deployment storage."
+        ? "Connect Vercel Redis/Upstash Redis, or set FLASHREELS_SAMSAR_API_KEY as a Vercel environment variable."
         : "Secrets and library data are stored in the local .flashreels directory.",
     redisEnv: {
       url: process.env.KV_REST_API_URL

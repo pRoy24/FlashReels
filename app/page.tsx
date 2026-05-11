@@ -19,6 +19,29 @@ const sections = [
   },
 ];
 
+const flowSteps = [
+  {
+    label: "01",
+    title: "Prompt",
+    body: "Start with a product idea, scene direction, or a stitched image set.",
+  },
+  {
+    label: "02",
+    title: "Generate",
+    body: "Run image and motion stages with visible status at each handoff.",
+  },
+  {
+    label: "03",
+    title: "Library",
+    body: "Save completed renders with the creator account and source context.",
+  },
+  {
+    label: "04",
+    title: "Publish",
+    body: "Promote the finished reel into fullscreen public playback.",
+  },
+];
+
 export default async function LandingPage() {
   const publishedVideos = await listPublishedFeedItems();
 
@@ -99,8 +122,14 @@ export default async function LandingPage() {
             );
           })}
         </div>
-        <div className="workflowVisual" aria-hidden="true">
-          <img src="/assets/flashreels-video-section-screenshot.png" alt="" />
+        <div className="workflowMap" aria-label="FlashReels production sequence">
+          {flowSteps.map((step) => (
+            <article className="workflowStep" key={step.label}>
+              <span>{step.label}</span>
+              <h3>{step.title}</h3>
+              <p>{step.body}</p>
+            </article>
+          ))}
         </div>
       </section>
 

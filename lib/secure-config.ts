@@ -7,6 +7,8 @@ import { getPersistenceStatus, readPersistentJson, writePersistentJson } from "@
 
 const STORE_KEY = "flashreels:secrets:v1";
 const STORE_FILE = "secrets.json";
+const ENCRYPTION_SEED_KEY = "flashreels:encryption-seed:v1";
+const ENCRYPTION_SEED_FILE = "encryption-seed.json";
 
 type SecretName = "samsarApiKey" | "runwayApiKey" | "serverSecret";
 
@@ -22,34 +24,50 @@ interface SecretStore {
   keys: Partial<Record<SecretName, EncryptedSecret>>;
 }
 
+interface EncryptionSeedStore {
+  version: 1;
+  seed: string;
+  createdAt: string;
+}
+
 const EMPTY_STORE: SecretStore = {
   version: 1,
   updatedAt: new Date(0).toISOString(),
   keys: {},
 };
 
-function getEncryptionKey() {
-  const seed = (
-    process.env.FLASHREELS_SECRET ||
-    process.env.FLASHREELS_AUTH_SECRET ||
-    `${os.hostname()}:${os.userInfo().username}:${process.cwd()}`
+async function getPersistentEncryptionSeed() {
+  const stored = await readPersistentJson<EncryptionSeedStore>(ENCRYPTION_SEED_KEY, ENCRYPTION_SEED_FILE, {
+    version: 1,
+    seed: "",
+    createdAt: "",
+  });
+  if (stored.seed) {
+    return stored.seed;
+  }
+
+  const nextSeed = {
+    version: 1 as const,
+    seed: crypto.randomBytes(32).toString("base64url"),
+    createdAt: new Date().toISOString(),
+  };
+  await writePersistentJson(ENCRYPTION_SEED_KEY, ENCRYPTION_SEED_FILE, nextSeed);
+  return nextSeed.seed;
+}
+
+async function getEncryptionKey() {
+  const configuredSeed = process.env.FLASHREELS_SECRET || process.env.FLASHREELS_AUTH_SECRET;
+  const seed = configuredSeed || (
+    process.env.VERCEL === "1"
+      ? await getPersistentEncryptionSeed()
+      : `${os.hostname()}:${os.userInfo().username}:${process.cwd()}`
   );
   return crypto.createHash("sha256").update(seed).digest();
 }
 
-function hasStableEncryptionSeed() {
-  return Boolean(process.env.FLASHREELS_SECRET || process.env.FLASHREELS_AUTH_SECRET);
-}
-
-function requireStableRemoteEncryptionSeed() {
-  if (process.env.VERCEL === "1" && !hasStableEncryptionSeed()) {
-    throw apiError("Set FLASHREELS_SECRET or FLASHREELS_AUTH_SECRET in Vercel before saving setup secrets.", 412);
-  }
-}
-
-function encrypt(value: string): EncryptedSecret {
+function encrypt(value: string, key: Buffer): EncryptedSecret {
   const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv("aes-256-gcm", getEncryptionKey(), iv);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
   const encrypted = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
   return {
     iv: iv.toString("base64url"),
@@ -58,14 +76,17 @@ function encrypt(value: string): EncryptedSecret {
   };
 }
 
-function decrypt(secret?: EncryptedSecret) {
+function decrypt(secret: EncryptedSecret | undefined, key: Buffer | null) {
   if (!secret) {
+    return "";
+  }
+  if (!key) {
     return "";
   }
   try {
     const decipher = crypto.createDecipheriv(
       "aes-256-gcm",
-      getEncryptionKey(),
+      key,
       Buffer.from(secret.iv, "base64url"),
     );
     decipher.setAuthTag(Buffer.from(secret.tag, "base64url"));
@@ -154,14 +175,14 @@ export async function saveRuntimeKeys(payload: Record<string, unknown>) {
   if (serverSecret) {
     validateServerSecret(serverSecret);
   }
-  requireStableRemoteEncryptionSeed();
 
+  const encryptionKey = await getEncryptionKey();
   const store = await readStore();
   store.keys = {
     ...store.keys,
-    ...(samsarApiKey ? { samsarApiKey: encrypt(samsarApiKey) } : {}),
-    ...(runwayApiKey ? { runwayApiKey: encrypt(runwayApiKey) } : {}),
-    ...(serverSecret ? { serverSecret: encrypt(serverSecret) } : {}),
+    ...(samsarApiKey ? { samsarApiKey: encrypt(samsarApiKey, encryptionKey) } : {}),
+    ...(runwayApiKey ? { runwayApiKey: encrypt(runwayApiKey, encryptionKey) } : {}),
+    ...(serverSecret ? { serverSecret: encrypt(serverSecret, encryptionKey) } : {}),
   };
   store.updatedAt = new Date().toISOString();
   await writeStore(store);
@@ -174,9 +195,11 @@ export async function getRuntimeKeys() {
   const samsarEnv = envValue(envNames("samsarApiKey"));
   const runwayEnv = envValue(envNames("runwayApiKey"));
   const serverSecretEnv = envValue(envNames("serverSecret"));
-  const samsarApiKey = samsarEnv.value || decrypt(store.keys.samsarApiKey);
-  const runwayApiKey = runwayEnv.value || decrypt(store.keys.runwayApiKey);
-  const serverSecret = serverSecretEnv.value || decrypt(store.keys.serverSecret);
+  const hasStoredSecrets = Boolean(store.keys.samsarApiKey || store.keys.runwayApiKey || store.keys.serverSecret);
+  const encryptionKey = hasStoredSecrets ? await getEncryptionKey() : null;
+  const samsarApiKey = samsarEnv.value || decrypt(store.keys.samsarApiKey, encryptionKey);
+  const runwayApiKey = runwayEnv.value || decrypt(store.keys.runwayApiKey, encryptionKey);
+  const serverSecret = serverSecretEnv.value || decrypt(store.keys.serverSecret, encryptionKey);
 
   return {
     samsarApiKey,

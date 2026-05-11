@@ -60,7 +60,7 @@ The server secret must be at least 24 characters, contain no whitespace, and inc
 
 In local development, wizard saves are written to the encrypted `.flashreels` store and mirrored into `.env.local` for future dev-server restarts. Set `FLASHREELS_ENV_FILE` to another project-local `.env*` file name if needed, or set `FLASHREELS_WRITE_ENV_FILE=0` to disable env-file writes.
 
-On Vercel, runtime code cannot persist changes to deployment env files. Configure Vercel KV or Upstash Redis with `KV_REST_API_URL` / `KV_REST_API_TOKEN` or `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`; the authenticated wizard will then save encrypted secrets to Redis. Also set a stable `FLASHREELS_SECRET` or `FLASHREELS_AUTH_SECRET` in the Vercel project so encrypted Redis values remain decryptable across deployments.
+On Vercel, runtime code cannot persist changes to deployment env files. Connect Vercel Redis or Upstash Redis so `KV_REST_API_URL` / `KV_REST_API_TOKEN` or `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` are injected; the authenticated wizard will then save encrypted secrets to Redis and bootstrap a persistent encryption seed automatically. If you do not want runtime secret storage, set `FLASHREELS_SAMSAR_API_KEY` directly in the Vercel project environment variables instead.
 
 Optional defaults are documented in `.env.example`, including base URLs, Runway model names, the public callback base URL, env-file controls, and Vercel Redis / Upstash persistence variables.
 

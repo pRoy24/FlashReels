@@ -768,14 +768,14 @@ function SetupWizard({
           <div>
             <p className="eyebrow">Startup wizard</p>
             <h1>Connect FlashReels</h1>
-            <p className="setupLead">Add your Samsar.one API key to start creating reels.</p>
+            <p className="setupLead">Add your Samsar.one API key to start creating reels. Connected Vercel Redis or Upstash Redis is used automatically when present.</p>
           </div>
           <KeyRound size={24} />
         </div>
 
         <div className="setupStatusGrid">
           <StatusPill ready={Boolean(setup?.samsarConfigured)} label="Samsar API key" source={setup?.samsarSource} />
-          <StatusPill ready={secretStorage.ready} label="Secret storage" source={secretStorage.source} />
+          <StatusPill ready={secretStorage.ready} label="Deployment storage" source={secretStorage.source} />
         </div>
 
         <label className="requiredField">
@@ -853,6 +853,9 @@ function StatusPill({ ready, label, source }: { ready: boolean; label: string; s
 function getSecretStorageStatus(setup: SetupStatus | null) {
   if (!setup) {
     return { ready: false, source: "" };
+  }
+  if (setup.samsarConfigured && setup.samsarSource && setup.samsarSource !== "encrypted_store") {
+    return { ready: true, source: `Using ${setup.samsarSource}` };
   }
   if (setup.persistence?.remoteSafe) {
     return { ready: true, source: setup.persistence.provider };
