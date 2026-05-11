@@ -193,10 +193,10 @@ button:disabled {
 
 .heroGrid {
   display: grid;
-  grid-template-columns: minmax(360px, 0.82fr) minmax(560px, 1.18fr);
-  gap: clamp(28px, 4vw, 56px);
+  grid-template-columns: minmax(320px, 0.72fr) minmax(0, 1.28fr);
+  gap: clamp(28px, 3.4vw, 48px);
   align-items: center;
-  width: min(1380px, 100%);
+  width: min(1500px, 100%);
   min-height: 0;
   margin: 0 auto;
   padding: clamp(34px, 7vh, 80px) 0 34px;
@@ -251,6 +251,8 @@ button:disabled {
 .heroVisual {
   position: relative;
   display: grid;
+  justify-self: end;
+  width: min(100%, 980px);
   aspect-ratio: 16 / 9;
   min-height: 0;
   padding: 0;
@@ -3058,6 +3060,7 @@ button.feedNavPill {
   }
 
   .heroVisual {
+    justify-self: center;
     width: 100%;
     min-width: 0;
     max-width: 760px;

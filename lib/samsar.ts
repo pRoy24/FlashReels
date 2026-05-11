@@ -44,6 +44,16 @@ function buildCustomAdapters(request: Request, serverSecret: string) {
   };
 }
 
+function getV2RequestOptions(user: Awaited<ReturnType<typeof requireSessionUserRecord>>) {
+  if (user.role === "admin" || user.externalApiKey) {
+    return {};
+  }
+
+  return {
+    externalUser: buildFlashReelsExternalUser(user),
+  };
+}
+
 const DEFAULT_MANUAL_STEP_STAGES = ["ai_video_generation"];
 
 function shouldAutoRenderFullVideo(payload: Record<string, unknown>) {
@@ -72,7 +82,7 @@ export async function startSamsarStepVideo(request: Request, payload: StartPaylo
       : {}),
   };
   const response = await client.createV2StepImageToVideo(input, {
-    externalUser: buildFlashReelsExternalUser(user),
+    ...getV2RequestOptions(user),
   });
   return response.data;
 }
@@ -88,7 +98,7 @@ export async function getSamsarStepStatusDetailed(
   }
   const client = getClient(await getSamsarApiKeyForUser(request, user));
   const response = await client.getV2StepVideoStatusDetailed(requestId, {
-    externalUser: buildFlashReelsExternalUser(user),
+    ...getV2RequestOptions(user),
   });
   return response.data;
 }
@@ -106,7 +116,7 @@ export async function getSamsarVideoStatusDetailed(
   }
   const client = getClient(await getSamsarApiKeyForUser(request, user));
   const response = await client.getV2StatusDetailed(requestId, {
-    externalUser: buildFlashReelsExternalUser(user),
+    ...getV2RequestOptions(user),
   });
   return response.data;
 }
@@ -118,7 +128,7 @@ export async function translateSamsarVideo(
   const user = await requireSessionUserRecord(request);
   const client = getClient(await getSamsarApiKeyForUser(request, user));
   const response = await client.translateV2Video(input, {
-    externalUser: buildFlashReelsExternalUser(user),
+    ...getV2RequestOptions(user),
   });
   return response.data as TranslateVideoResponse;
 }
@@ -130,7 +140,7 @@ export async function cloneSamsarVideo(
   const user = await requireSessionUserRecord(request);
   const client = getClient(await getSamsarApiKeyForUser(request, user));
   const response = await client.cloneV2Video(input, {
-    externalUser: buildFlashReelsExternalUser(user),
+    ...getV2RequestOptions(user),
   });
   return response.data;
 }
@@ -144,7 +154,7 @@ export async function regenerateSamsarVideoAvatar(
   const response = await client.postV2<CloneVideoResponse>("video/regenerate_avatar", {
     input,
   }, {
-    externalUser: buildFlashReelsExternalUser(user),
+    ...getV2RequestOptions(user),
   });
   return response.data;
 }
@@ -156,7 +166,7 @@ export async function updateSamsarVideoFooter(
   const user = await requireSessionUserRecord(request);
   const client = getClient(await getSamsarApiKeyForUser(request, user));
   const response = await client.updateV2VideoFooterImage(input, {
-    externalUser: buildFlashReelsExternalUser(user),
+    ...getV2RequestOptions(user),
   });
   return response.data as UpdateVideoFooterImageResponse;
 }
@@ -172,7 +182,7 @@ export async function joinSamsarVideos(
     response = await client.postV2<JoinVideosResponse>("join_videos", {
       input,
     }, {
-      externalUser: buildFlashReelsExternalUser(user),
+      ...getV2RequestOptions(user),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
@@ -195,7 +205,7 @@ export async function processNextSamsarStep(
   }
   const client = getClient(await getSamsarApiKeyForUser(request, user));
   const response = await client.processNextV2StepVideo(requestId, {
-    externalUser: buildFlashReelsExternalUser(user),
+    ...getV2RequestOptions(user),
   });
   return response.data;
 }
