@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, Film, Layers3, Play, ShieldCheck, Sparkles } from "lucide-react";
+import { ArrowRight, Film, Play, ShieldCheck } from "lucide-react";
 
 const sections = [
   {
@@ -58,35 +58,15 @@ export default function LandingPage() {
           </div>
 
           <div className="heroVisual" aria-hidden="true">
-            <div className="visualTopbar">
-              <span />
-              <span />
-              <span />
-            </div>
-            <div className="visualTimeline">
-              <div className="visualTrack active">
-                <Sparkles size={16} />
-                <span>Prompt</span>
-              </div>
-              <div className="visualTrack active">
-                <Layers3 size={16} />
-                <span>Images</span>
-              </div>
-              <div className="visualTrack">
-                <Film size={16} />
-                <span>Video</span>
-              </div>
-            </div>
             <div className="visualFrame">
-              <div className="frameGrid">
-                <span />
-                <span />
-                <span />
-                <span />
-              </div>
-              <div className="playCore">
-                <Play size={24} />
-              </div>
+              <video
+                className="heroAnimationVideo"
+                src="/assets/flashreels-louisiana-hero-animation.mp4"
+                autoPlay
+                muted
+                loop
+                playsInline
+              />
             </div>
           </div>
         </div>

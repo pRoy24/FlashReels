@@ -231,87 +231,36 @@ button:disabled {
 }
 
 .heroVisual {
+  display: grid;
   min-height: 520px;
-  padding: 16px;
+  padding: 0;
+  overflow: hidden;
   border: 1px solid var(--line-strong);
   border-radius: 8px;
   background: #0c1014;
   box-shadow: var(--shadow);
 }
 
-.visualTopbar {
-  display: flex;
-  gap: 8px;
-  height: 30px;
-}
-
-.visualTopbar span {
-  width: 9px;
-  height: 9px;
-  border-radius: 999px;
-  background: var(--line-strong);
-}
-
-.visualTimeline {
-  display: grid;
-  gap: 10px;
-  margin: 18px 0;
-}
-
-.visualTrack {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  height: 44px;
-  padding: 0 12px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  color: var(--muted);
-  background: var(--surface);
-}
-
-.visualTrack.active {
-  border-color: #2e7554;
-  color: var(--text);
-  background: #132018;
-}
-
 .visualFrame {
   position: relative;
   display: grid;
   place-items: center;
-  height: 330px;
+  aspect-ratio: auto;
+  width: 100%;
+  height: 100%;
+  min-height: inherit;
   overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  border: 0;
+  border-radius: inherit;
   background: #11171d;
 }
 
-.frameGrid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 10px;
-  width: 74%;
-  opacity: 0.78;
-}
-
-.frameGrid span {
-  aspect-ratio: 16 / 10;
-  border: 1px solid var(--line-strong);
-  border-radius: 6px;
-  background: #1c252d;
-}
-
-.playCore {
-  position: absolute;
-  display: grid;
-  place-items: center;
-  width: 72px;
-  height: 72px;
-  border: 1px solid #3d8f66;
-  border-radius: 999px;
-  background: #12321f;
-  color: var(--accent);
+.heroAnimationVideo {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  background: #06090c;
 }
 
 .landingBand {
@@ -1972,6 +1921,104 @@ textarea:focus {
   box-shadow: none;
 }
 
+.publicFeedControls {
+  position: fixed;
+  z-index: 12;
+  top: 50%;
+  right: clamp(12px, 3vw, 30px);
+  display: grid;
+  gap: 10px;
+  transform: translateY(-50%);
+  pointer-events: auto;
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.publicFeedControls button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  background: rgba(12, 15, 18, 0.68);
+  color: #f4f6f7;
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(16px);
+  transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
+}
+
+.publicFeedControls button:hover,
+.publicFeedControls button:focus-visible,
+.publicFeedVolume.open > button {
+  border-color: rgba(255, 255, 255, 0.34);
+  background: rgba(244, 246, 247, 0.16);
+}
+
+.publicFeedControls button:active {
+  transform: scale(0.96);
+}
+
+.publicFeedVolume {
+  position: relative;
+}
+
+.publicFeedVolumePanel {
+  position: absolute;
+  right: 52px;
+  top: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 136px;
+  padding: 12px 0;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  background: rgba(12, 15, 18, 0.78);
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.32);
+  transform: translateY(-50%);
+  backdrop-filter: blur(16px);
+}
+
+.publicFeedVolumePanel input {
+  width: 108px;
+  height: 24px;
+  accent-color: #f4f6f7;
+  transform: rotate(-90deg);
+}
+
+.publicFeedScrubber {
+  position: fixed;
+  z-index: 12;
+  left: clamp(12px, 4vw, 44px);
+  right: clamp(12px, 4vw, 44px);
+  bottom: 10px;
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) 42px;
+  align-items: center;
+  gap: 10px;
+  color: rgba(244, 246, 247, 0.8);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: auto;
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.publicFeedScrubber span:last-child {
+  text-align: right;
+}
+
+.publicFeedScrubber input,
+.publicFeedVolumePanel input {
+  cursor: pointer;
+}
+
+.publicFeedScrubber input {
+  width: 100%;
+  accent-color: #f4f6f7;
+}
+
 .publicFeedMeta {
   position: absolute;
   left: clamp(14px, 4vw, 44px);
@@ -1990,12 +2037,19 @@ textarea:focus {
 }
 
 .publicFeedShell.overlayHidden .publicFeedHeader,
-.publicFeedShell.overlayHidden .publicFeedMeta {
+.publicFeedShell.overlayHidden .publicFeedMeta,
+.publicFeedShell.overlayHidden .publicFeedControls,
+.publicFeedShell.overlayHidden .publicFeedScrubber {
   opacity: 0;
 }
 
-.publicFeedShell.overlayHidden .publicFeedMeta {
+.publicFeedShell.overlayHidden .publicFeedMeta,
+.publicFeedShell.overlayHidden .publicFeedScrubber {
   transform: translateY(8px);
+}
+
+.publicFeedShell.overlayHidden .publicFeedControls {
+  transform: translate(8px, -50%);
 }
 
 .publicFeedMeta p,
@@ -2162,6 +2216,14 @@ textarea:focus {
     grid-template-columns: 1fr;
   }
 
+  .heroGrid,
+  .heroCopy,
+  .heroCopy p {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+
   .publicFeedItem {
     display: grid;
   }
@@ -2171,12 +2233,32 @@ textarea:focus {
   }
 
   .heroVisual {
+    width: 100%;
+    min-width: 0;
     min-height: 420px;
+  }
+
+  .visualFrame {
+    width: 100%;
+  }
+
+  .inputStageGrid,
+  .transitionStage {
+    grid-template-columns: 1fr;
   }
 
   .appTopbar,
   .topbarActions {
     flex-wrap: wrap;
+  }
+
+  .landingNav {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .landingNavActions {
+    justify-content: flex-start;
   }
 
   .appBody,
@@ -2298,5 +2380,31 @@ textarea:focus {
 
   .publicFeedActions a {
     flex: 1;
+  }
+
+  .publicFeedControls {
+    top: auto;
+    right: 12px;
+    bottom: 58px;
+    transform: none;
+  }
+
+  .publicFeedShell.overlayHidden .publicFeedControls {
+    transform: translateY(8px);
+  }
+
+  .publicFeedControls button {
+    width: 40px;
+    height: 40px;
+  }
+
+  .publicFeedVolumePanel {
+    right: 48px;
+  }
+
+  .publicFeedScrubber {
+    grid-template-columns: 38px minmax(0, 1fr) 38px;
+    bottom: 8px;
+    gap: 8px;
   }
 }
