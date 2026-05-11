@@ -744,6 +744,11 @@ function SetupWizard({
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
   async function submit() {
+    if (!canWriteRuntimeSecrets(setup)) {
+      setError(getRuntimeSecretWriteStatus(setup).source);
+      return;
+    }
+
     setSaving(true);
     setError("");
     try {
@@ -766,7 +771,7 @@ function SetupWizard({
     }
   }
 
-  const secretStorage = getSecretStorageStatus(setup);
+  const writeStorage = getRuntimeSecretWriteStatus(setup);
 
   return (
     <section className="setupSurface">
@@ -783,8 +788,10 @@ function SetupWizard({
         <div className="setupStatusGrid">
           <StatusPill ready label="Admin login" source="email password" />
           <StatusPill ready={Boolean(setup?.samsarConfigured)} label="Samsar API key" source={setup?.samsarSource} />
-          <StatusPill ready={secretStorage.ready} label="Deployment storage" source={secretStorage.source} />
+          <StatusPill ready={writeStorage.ready} label="Writable storage" source={writeStorage.source} />
         </div>
+
+        {!writeStorage.ready ? <div className="errorBox">{writeStorage.source}</div> : null}
 
         <label className="requiredField">
           <span>Samsar.one API key <small>Required</small></span>
@@ -839,7 +846,7 @@ function SetupWizard({
 
         {error ? <div className="errorBox">{error}</div> : null}
 
-        <button className="primaryButton" onClick={submit} disabled={saving || (!samsarApiKey && !runwayApiKey && !serverSecret)}>
+        <button className="primaryButton" onClick={submit} disabled={!writeStorage.ready || saving || (!samsarApiKey && !runwayApiKey && !serverSecret)}>
           {saving ? <Loader2 className="spin" size={17} /> : <Check size={17} />}
           Save secure setup
         </button>
@@ -875,6 +882,11 @@ function FirstRunOnboarding({
   }, [setup]);
 
   async function saveKeys() {
+    if (!canWriteRuntimeSecrets(currentSetup)) {
+      setError(getRuntimeSecretWriteStatus(currentSetup).source);
+      return;
+    }
+
     setSaving(true);
     setError("");
     try {
@@ -920,7 +932,7 @@ function FirstRunOnboarding({
     }
   }
 
-  const secretStorage = getSecretStorageStatus(currentSetup);
+  const writeStorage = getRuntimeSecretWriteStatus(currentSetup);
 
   return (
     <section className="setupSurface">
@@ -940,12 +952,14 @@ function FirstRunOnboarding({
 
         <div className="setupStatusGrid">
           <StatusPill ready={Boolean(currentSetup?.samsarConfigured)} label="Samsar API key" source={currentSetup?.samsarSource} />
-          <StatusPill ready={secretStorage.ready} label="Deployment storage" source={secretStorage.source} />
+          <StatusPill ready={writeStorage.ready} label="Writable storage" source={writeStorage.source} />
           <StatusPill ready={step === "admin"} label="Admin login" source={step === "admin" ? "next step" : "pending"} />
         </div>
 
         {step === "keys" ? (
           <>
+            {!writeStorage.ready ? <div className="errorBox">{writeStorage.source}</div> : null}
+
             <label className="requiredField">
               <span>Samsar.one API key <small>Required</small></span>
               <input
@@ -1007,7 +1021,7 @@ function FirstRunOnboarding({
         {error ? <div className="errorBox">{error}</div> : null}
 
         {step === "keys" ? (
-          <button className="primaryButton" onClick={saveKeys} disabled={saving || (!samsarApiKey && !runwayApiKey && !serverSecret)}>
+          <button className="primaryButton" onClick={saveKeys} disabled={!writeStorage.ready || saving || (!samsarApiKey && !runwayApiKey && !serverSecret)}>
             {saving ? <Loader2 className="spin" size={17} /> : <Check size={17} />}
             Save keys and continue
           </button>
@@ -1052,6 +1066,29 @@ function getSecretStorageStatus(setup: SetupStatus | null) {
     ready: false,
     source: setup.persistence?.reason || setup.envFile?.reason || setup.persistence?.provider || "",
   };
+}
+
+function getRuntimeSecretWriteStatus(setup: SetupStatus | null) {
+  if (!setup) {
+    return { ready: false, source: "" };
+  }
+  if (setup.persistence?.remoteSafe) {
+    return { ready: true, source: setup.persistence.provider };
+  }
+  if (setup.envFile?.writable) {
+    return { ready: true, source: `${setup.envFile.target} + local store` };
+  }
+  if (setup.persistence?.persistent) {
+    return { ready: true, source: setup.persistence.provider };
+  }
+  return {
+    ready: false,
+    source: setup.persistence?.reason || "Runtime secret storage is not writable.",
+  };
+}
+
+function canWriteRuntimeSecrets(setup: SetupStatus | null) {
+  return getRuntimeSecretWriteStatus(setup).ready;
 }
 
 function shouldOpenSamsarApiKeyDialog(error: unknown) {
