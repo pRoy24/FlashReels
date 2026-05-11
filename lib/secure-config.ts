@@ -244,18 +244,21 @@ export async function getRuntimeKeys(request?: Request): Promise<RuntimeKeys> {
   const serverSecretEnv = envValue(envNames("serverSecret"));
   const hasStoredSecrets = Boolean(store.keys.samsarApiKey || store.keys.runwayApiKey || store.keys.serverSecret);
   const encryptionKey = hasStoredSecrets ? await getEncryptionKey() : null;
-  const samsarApiKey = samsarEnv.value || decrypt(store.keys.samsarApiKey, encryptionKey);
-  const runwayApiKey = runwayEnv.value || decrypt(store.keys.runwayApiKey, encryptionKey);
-  const serverSecret = serverSecretEnv.value || decrypt(store.keys.serverSecret, encryptionKey);
+  const storedSamsarApiKey = decrypt(store.keys.samsarApiKey, encryptionKey);
+  const storedRunwayApiKey = decrypt(store.keys.runwayApiKey, encryptionKey);
+  const storedServerSecret = decrypt(store.keys.serverSecret, encryptionKey);
+  const samsarApiKey = storedSamsarApiKey || samsarEnv.value;
+  const runwayApiKey = storedRunwayApiKey || runwayEnv.value;
+  const serverSecret = storedServerSecret || serverSecretEnv.value;
 
   return {
     samsarApiKey,
     runwayApiKey,
     serverSecret,
     sources: {
-      samsarApiKey: samsarEnv.value ? samsarEnv.source : samsarApiKey ? "encrypted_store" : "",
-      runwayApiKey: runwayEnv.value ? runwayEnv.source : runwayApiKey ? "encrypted_store" : "",
-      serverSecret: serverSecretEnv.value ? serverSecretEnv.source : serverSecret ? "encrypted_store" : "",
+      samsarApiKey: storedSamsarApiKey ? "encrypted_store" : samsarEnv.value ? samsarEnv.source : "",
+      runwayApiKey: storedRunwayApiKey ? "encrypted_store" : runwayEnv.value ? runwayEnv.source : "",
+      serverSecret: storedServerSecret ? "encrypted_store" : serverSecretEnv.value ? serverSecretEnv.source : "",
     },
   };
 }

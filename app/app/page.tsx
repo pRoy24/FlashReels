@@ -1054,6 +1054,98 @@ function getSecretStorageStatus(setup: SetupStatus | null) {
   };
 }
 
+function shouldOpenSamsarApiKeyDialog(error: unknown) {
+  const message = error instanceof Error ? error.message : "";
+  return /Invalid API_KEY|User not found|SAMSAR_API_KEY|Samsar API key is not configured/i.test(message);
+}
+
+function SamsarApiKeyDialog({
+  setup,
+  issue,
+  onSaved,
+  onClose,
+}: {
+  setup: SetupStatus | null;
+  issue: string;
+  onSaved: (setup: SetupStatus) => void;
+  onClose: () => void;
+}) {
+  const [samsarApiKey, setSamsarApiKey] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const secretStorage = getSecretStorageStatus(setup);
+
+  async function saveKey() {
+    if (!samsarApiKey.trim()) {
+      setError("Paste a Samsar.one API key to continue.");
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+    try {
+      const nextSetup = await readApi<SetupStatus>("/api/setup", {
+        method: "POST",
+        body: JSON.stringify({ samsarApiKey }),
+      });
+      setSamsarApiKey("");
+      onSaved(nextSetup);
+      onClose();
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Unable to save Samsar API key.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="modalBackdrop" role="presentation">
+      <section className="advancedModal" role="dialog" aria-modal="true" aria-label="Samsar API key">
+        <div className="modalHeader">
+          <div>
+            <p className="eyebrow">Admin setup</p>
+            <h2>Update Samsar API key</h2>
+          </div>
+          <button className="iconButton" onClick={onClose} type="button" aria-label="Close Samsar API key dialog">
+            <X size={17} />
+          </button>
+        </div>
+
+        <div className="modalScroll">
+          <div className="setupStatusGrid compactStatusGrid">
+            <StatusPill ready={Boolean(setup?.samsarConfigured)} label="Current key" source={setup?.samsarSource || "not saved"} />
+            <StatusPill ready={secretStorage.ready} label="Project storage" source={secretStorage.source} />
+          </div>
+
+          {issue ? (
+            <div className="errorBox">
+              <span>{issue}</span>
+            </div>
+          ) : null}
+
+          <label className="requiredField">
+            <span>Samsar.one API key <small>Required</small></span>
+            <input
+              type="password"
+              value={samsarApiKey}
+              onChange={(event) => setSamsarApiKey(event.target.value)}
+              placeholder="Paste key"
+              autoFocus
+            />
+          </label>
+
+          {error ? <div className="errorBox">{error}</div> : null}
+
+          <button className="primaryButton" onClick={saveKey} disabled={saving || !samsarApiKey.trim()}>
+            {saving ? <Loader2 className="spin" size={17} /> : <Check size={17} />}
+            Save secure key
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function AuthGate({
   initialMode = "register",
   modal = false,
@@ -1651,6 +1743,8 @@ export default function FlashReelsApp() {
   const [publishedItems, setPublishedItems] = useState<PublishedFeedItem[]>([]);
   const [authDialogOpen, setAuthDialogOpen] = useState(false);
   const [authDialogMode, setAuthDialogMode] = useState<"login" | "register">("register");
+  const [samsarKeyDialogOpen, setSamsarKeyDialogOpen] = useState(false);
+  const [samsarKeyIssue, setSamsarKeyIssue] = useState("");
   const latestPublishedItem = publishedItems[0] || null;
   const publishedStatus = useMemo(() => buildPublishedStatus(latestPublishedItem), [latestPublishedItem]);
   const displayStatus = user ? status : publishedStatus;
@@ -1895,7 +1989,12 @@ export default function FlashReelsApp() {
       setStatus(detailedData);
       await saveSessionSnapshot(detailedData, nextRequestId, payload, { refreshLibrary: true });
     } catch (startError) {
-      setError(startError instanceof Error ? startError.message : "Unable to start render.");
+      const message = startError instanceof Error ? startError.message : "Unable to start render.";
+      setError(message);
+      if ((user?.isAdmin || user?.role === "admin") && shouldOpenSamsarApiKeyDialog(startError)) {
+        setSamsarKeyIssue(message);
+        setSamsarKeyDialogOpen(true);
+      }
     } finally {
       setBusy(false);
     }
@@ -2703,6 +2802,18 @@ export default function FlashReelsApp() {
           modal
           onAuth={handleAuth}
           onCancel={() => setAuthDialogOpen(false)}
+        />
+      ) : null}
+      {samsarKeyDialogOpen && user && (user.isAdmin || user.role === "admin") ? (
+        <SamsarApiKeyDialog
+          setup={setup}
+          issue={samsarKeyIssue}
+          onSaved={(nextSetup) => {
+            setSetup(nextSetup);
+            setSamsarKeyIssue("");
+            setError("");
+          }}
+          onClose={() => setSamsarKeyDialogOpen(false)}
         />
       ) : null}
     </main>
