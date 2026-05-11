@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, Film, Play, ShieldCheck } from "lucide-react";
+import { ArrowRight, Film, ShieldCheck } from "lucide-react";
 
 const sections = [
   {
@@ -50,10 +50,8 @@ export default function LandingPage() {
                 View Public Feed
               </Link>
               <Link className="secondaryAction appAccessAction" href="/app">
-                <Play size={17} />
-                App Access
+                Access App
               </Link>
-              <span className="subtleNote">Permitted for whitelisted addresses</span>
             </div>
           </div>
 
