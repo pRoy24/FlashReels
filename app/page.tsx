@@ -11,6 +11,8 @@ const landingTitle = "FlashReels | Step-Controlled Generative Video";
 const landingDescription = "Create, review, and publish RunwayML-powered image-list-to-video reels from a focused production workspace.";
 const landingOgImage = "/opengraph-image";
 
+export const dynamic = "force-dynamic";
+
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: landingTitle,
