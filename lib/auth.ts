@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { NextResponse } from "next/server";
 
 import { apiError, normalizeString } from "@/lib/http";
-import { isAdminEmail, mutateDb, normalizeEmail, nowIso, publicUser, readDb, type FlashReelsUser } from "@/lib/db";
+import { mutateDb, normalizeEmail, nowIso, publicUser, readDb, type FlashReelsUser } from "@/lib/db";
 
 const COOKIE_NAME = "flashreels_session";
 const SESSION_SECONDS = 60 * 60 * 24 * 7;
@@ -63,23 +63,56 @@ export async function registerUser(payload: Record<string, unknown>) {
   }
 
   return mutateDb(async (db) => {
-    const whitelist = new Set(db.whitelistEmails.map(normalizeEmail));
-    if (!whitelist.has(email)) {
-      throw apiError("This email is not whitelisted for FlashReels registration.", 403);
+    if (db.users.length === 0) {
+      throw apiError("Complete admin onboarding before external users register.", 409);
     }
 
     if (db.users.some((user) => user.email === email)) {
       throw apiError("A user with this email already exists.", 409);
     }
 
-    const role = db.users.length === 0 || isAdminEmail(email) ? "admin" : "user";
     const passwordData = hashPassword(password);
     const createdAt = nowIso();
     const user: FlashReelsUser = {
       id: crypto.randomUUID(),
       email,
       displayName,
-      role,
+      role: "user",
+      passwordHash: passwordData.hash,
+      passwordSalt: passwordData.salt,
+      passwordIterations: passwordData.iterations,
+      createdAt,
+      updatedAt: createdAt,
+    };
+    db.users.push(user);
+    return publicUser(user);
+  });
+}
+
+export async function createBootstrapAdminUser(payload: Record<string, unknown>) {
+  const email = normalizeEmail(payload.email);
+  const password = normalizeString(payload.password);
+  const displayName = normalizeString(payload.displayName) || email.split("@")[0] || "FlashReels Admin";
+
+  if (!email || !email.includes("@")) {
+    throw apiError("A valid admin email is required.");
+  }
+  if (password.length < 8) {
+    throw apiError("Admin password must be at least 8 characters.");
+  }
+
+  return mutateDb(async (db) => {
+    if (db.users.length > 0) {
+      throw apiError("Admin onboarding is already complete.", 409);
+    }
+
+    const passwordData = hashPassword(password);
+    const createdAt = nowIso();
+    const user: FlashReelsUser = {
+      id: crypto.randomUUID(),
+      email,
+      displayName,
+      role: "admin",
       passwordHash: passwordData.hash,
       passwordSalt: passwordData.salt,
       passwordIterations: passwordData.iterations,
@@ -127,6 +160,11 @@ export function clearSessionCookie(response: NextResponse) {
 }
 
 export async function getSessionUser(request: Request) {
+  const user = await getSessionUserRecord(request);
+  return user ? publicUser(user) : null;
+}
+
+export async function getSessionUserRecord(request: Request) {
   const cookie = parseCookies(request.headers.get("cookie")).get(COOKIE_NAME);
   if (!cookie) {
     return null;
@@ -146,17 +184,32 @@ export async function getSessionUser(request: Request) {
       return null;
     }
     const db = await readDb();
-    const user = db.users.find((candidate) => candidate.id === session.userId);
-    return user ? publicUser(user) : null;
+    return db.users.find((candidate) => candidate.id === session.userId) || null;
   } catch {
     return null;
   }
 }
 
 export async function requireSessionUser(request: Request) {
-  const user = await getSessionUser(request);
+  const user = await getSessionUserRecord(request);
   if (!user) {
     throw apiError("Authentication is required.", 401);
+  }
+  return publicUser(user);
+}
+
+export async function requireSessionUserRecord(request: Request) {
+  const user = await getSessionUserRecord(request);
+  if (!user) {
+    throw apiError("Authentication is required.", 401);
+  }
+  return user;
+}
+
+export async function requireAdminUser(request: Request) {
+  const user = await requireSessionUserRecord(request);
+  if (user.role !== "admin") {
+    throw apiError("Admin access is required.", 403);
   }
   return user;
 }

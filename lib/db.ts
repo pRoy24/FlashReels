@@ -12,6 +12,9 @@ export interface FlashReelsUser {
   email: string;
   displayName: string;
   role?: "admin" | "user";
+  externalApiKey?: string;
+  externalApiKeyCreatedAt?: string;
+  externalApiKeyLastUsedAt?: string;
   passwordHash: string;
   passwordSalt: string;
   passwordIterations: number;
@@ -126,7 +129,10 @@ export function publicUser(user: FlashReelsUser) {
     email: user.email,
     displayName: user.displayName,
     role: user.role || "user",
-    isAdmin: isAdminEmail(user.email) || user.role === "admin",
+    isAdmin: user.role === "admin",
+    hasExternalApiKey: Boolean(user.externalApiKey),
+    externalApiKeyCreatedAt: user.externalApiKeyCreatedAt,
+    externalApiKeyLastUsedAt: user.externalApiKeyLastUsedAt,
     createdAt: user.createdAt,
   };
 }

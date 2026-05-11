@@ -414,6 +414,7 @@ button:disabled {
 .controlPanel,
 .previewPanel,
 .libraryPanel,
+.billingPanel,
 .stepCard,
 .libraryCard {
   border: 1px solid var(--line);
@@ -973,6 +974,10 @@ textarea:focus {
   background: var(--bg);
 }
 
+.billingShell {
+  min-height: 100vh;
+}
+
 .centerShell {
   display: grid;
   place-items: center;
@@ -1119,6 +1124,197 @@ button.feedNavPill {
   width: 100%;
   min-height: 112px;
   resize: vertical;
+}
+
+.billingSurface {
+  display: grid;
+  gap: 18px;
+  width: min(1180px, 100%);
+  margin: 0 auto;
+  padding: 26px 20px 42px;
+}
+
+.billingHeader,
+.billingPanelHeader,
+.billingMetric,
+.paymentSummary,
+.rechargeQuickAmounts {
+  display: flex;
+  align-items: center;
+}
+
+.billingHeader {
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.billingHeader h1,
+.billingPanel h2 {
+  margin: 0;
+}
+
+.billingHeader h1 {
+  font-size: 32px;
+  line-height: 1.05;
+}
+
+.billingAccountChip {
+  justify-content: center;
+}
+
+.billingMetricGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.billingMetric {
+  min-height: 112px;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.billingMetric svg,
+.billingPanelHeader svg {
+  color: var(--accent-2);
+}
+
+.billingMetric span,
+.billingPanel p,
+.paymentSummary span {
+  color: var(--muted);
+}
+
+.billingMetric strong {
+  font-size: 22px;
+  line-height: 1.05;
+}
+
+.billingGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.72fr);
+  gap: 14px;
+}
+
+.billingPanel {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+}
+
+.billingPanelHeader {
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.billingPanel p {
+  margin: 7px 0 0;
+  line-height: 1.42;
+}
+
+.rechargePanel label {
+  max-width: 280px;
+}
+
+.rechargeQuickAmounts {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.rechargeQuickAmounts button {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #0d1217;
+  color: var(--soft);
+  font-weight: 800;
+}
+
+.rechargeQuickAmounts button.active {
+  border-color: #327d58;
+  background: #1e5b3d;
+  color: #f2fff7;
+}
+
+.paymentSummary {
+  align-items: stretch;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.paymentSummary div,
+.paymentSummary a {
+  display: grid;
+  gap: 5px;
+  min-width: 128px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0d1217;
+}
+
+.paymentSummary a {
+  place-items: center;
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.auditPanel {
+  overflow: hidden;
+}
+
+.auditTable {
+  display: grid;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.auditRow {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.3fr) 110px minmax(150px, 1fr) 110px 180px;
+  min-width: 760px;
+  border-top: 1px solid var(--line);
+}
+
+.auditRow:first-child {
+  border-top: 0;
+}
+
+.auditRow span {
+  min-width: 0;
+  overflow: hidden;
+  padding: 11px 12px;
+  color: var(--soft);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.auditHead {
+  background: #0d1217;
+}
+
+.auditHead span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.auditEmpty,
+.billingLoading {
+  display: grid;
+  place-items: center;
+  min-height: 160px;
+  color: var(--muted);
 }
 
 .appBody {
@@ -2807,7 +3003,9 @@ button.feedNavPill {
 
 @media (max-width: 920px) {
   .heroGrid,
-  .studioGrid {
+  .studioGrid,
+  .billingGrid,
+  .billingMetricGrid {
     grid-template-columns: 1fr;
   }
 
@@ -2864,7 +3062,8 @@ button.feedNavPill {
   }
 
   .appTopbar,
-  .topbarActions {
+  .topbarActions,
+  .billingHeader {
     flex-wrap: wrap;
   }
 
@@ -2925,7 +3124,8 @@ button.feedNavPill {
   .landingHero,
   .appTopbar,
   .studio,
-  .libraryPanel {
+  .libraryPanel,
+  .billingSurface {
     padding: 16px;
   }
 
@@ -3004,9 +3204,15 @@ button.feedNavPill {
 
   .studioTopbar,
   .previewHeader,
-  .panelHeader {
+  .panelHeader,
+  .billingHeader,
+  .billingPanelHeader {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .billingHeader h1 {
+    font-size: 26px;
   }
 
   .wizardHeader {

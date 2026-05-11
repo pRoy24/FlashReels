@@ -7,6 +7,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleDashed,
+  CreditCard,
   Database,
   Download,
   Film,
@@ -39,6 +40,7 @@ interface User {
   displayName: string;
   role?: "admin" | "user";
   isAdmin?: boolean;
+  hasExternalApiKey?: boolean;
 }
 
 interface SetupStatus {
@@ -65,6 +67,11 @@ interface SetupStatus {
     writable: boolean;
     reason?: string;
   };
+}
+
+interface OnboardingStatus {
+  needed: boolean;
+  setup?: SetupStatus;
 }
 
 interface LibraryVideo {
@@ -768,12 +775,13 @@ function SetupWizard({
           <div>
             <p className="eyebrow">Startup wizard</p>
             <h1>Connect FlashReels</h1>
-            <p className="setupLead">Add your Samsar.one API key to start creating reels. Connected Vercel Redis or Upstash Redis is used automatically when present.</p>
+            <p className="setupLead">Your admin email and password are already saved for future login. Add the deployed Samsar.one API key used for external user billing and recharges.</p>
           </div>
           <KeyRound size={24} />
         </div>
 
         <div className="setupStatusGrid">
+          <StatusPill ready label="Admin login" source="email password" />
           <StatusPill ready={Boolean(setup?.samsarConfigured)} label="Samsar API key" source={setup?.samsarSource} />
           <StatusPill ready={secretStorage.ready} label="Deployment storage" source={secretStorage.source} />
         </div>
@@ -835,6 +843,180 @@ function SetupWizard({
           {saving ? <Loader2 className="spin" size={17} /> : <Check size={17} />}
           Save secure setup
         </button>
+      </div>
+    </section>
+  );
+}
+
+function FirstRunOnboarding({
+  setup,
+  onComplete,
+}: {
+  setup: SetupStatus | null;
+  onComplete: (user: User) => void;
+}) {
+  const [step, setStep] = useState<"keys" | "admin">(setup?.ready ? "admin" : "keys");
+  const [currentSetup, setCurrentSetup] = useState<SetupStatus | null>(setup);
+  const [samsarApiKey, setSamsarApiKey] = useState("");
+  const [runwayApiKey, setRunwayApiKey] = useState("");
+  const [serverSecret, setServerSecret] = useState("");
+  const [email, setEmail] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+
+  useEffect(() => {
+    setCurrentSetup(setup);
+    if (setup?.ready) {
+      setStep("admin");
+    }
+  }, [setup]);
+
+  async function saveKeys() {
+    setSaving(true);
+    setError("");
+    try {
+      const data = await readApi<{ setup: SetupStatus }>("/api/onboarding", {
+        method: "POST",
+        body: JSON.stringify({
+          step: "keys",
+          samsarApiKey,
+          runwayApiKey,
+          serverSecret,
+        }),
+      });
+      setCurrentSetup(data.setup);
+      setSamsarApiKey("");
+      setRunwayApiKey("");
+      setServerSecret("");
+      setStep("admin");
+    } catch (setupError) {
+      setError(setupError instanceof Error ? setupError.message : "Unable to save setup.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function createAdmin() {
+    setSaving(true);
+    setError("");
+    try {
+      const data = await readApi<{ user: User }>("/api/onboarding", {
+        method: "POST",
+        body: JSON.stringify({
+          step: "admin",
+          email,
+          displayName,
+          password,
+        }),
+      });
+      onComplete(data.user);
+    } catch (adminError) {
+      setError(adminError instanceof Error ? adminError.message : "Unable to create admin login.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const secretStorage = getSecretStorageStatus(currentSetup);
+
+  return (
+    <section className="setupSurface">
+      <div className="setupPanel">
+        <div className="panelHeader">
+          <div>
+            <p className="eyebrow">First setup</p>
+            <h1>{step === "keys" ? "Connect Samsar billing" : "Create admin login"}</h1>
+            <p className="setupLead">
+              {step === "keys"
+                ? "Save the internal Samsar.one API key first. External users will register separately and bill through this account."
+                : "Create the internal admin email and password used for future FlashReels administration."}
+            </p>
+          </div>
+          <KeyRound size={24} />
+        </div>
+
+        <div className="setupStatusGrid">
+          <StatusPill ready={Boolean(currentSetup?.samsarConfigured)} label="Samsar API key" source={currentSetup?.samsarSource} />
+          <StatusPill ready={secretStorage.ready} label="Deployment storage" source={secretStorage.source} />
+          <StatusPill ready={step === "admin"} label="Admin login" source={step === "admin" ? "next step" : "pending"} />
+        </div>
+
+        {step === "keys" ? (
+          <>
+            <label className="requiredField">
+              <span>Samsar.one API key <small>Required</small></span>
+              <input
+                type="password"
+                value={samsarApiKey}
+                onChange={(event) => setSamsarApiKey(event.target.value)}
+                placeholder={currentSetup?.samsarConfigured ? "Configured" : "Paste key"}
+              />
+            </label>
+
+            <div className="advancedSetup">
+              <button className="advancedSetupToggle" onClick={() => setAdvancedOpen((open) => !open)} type="button">
+                <Settings2 size={16} />
+                <span>Advanced</span>
+                <small>Optional</small>
+              </button>
+
+              {advancedOpen ? (
+                <div className="advancedSetupBody">
+                  <label>
+                    <span>RunwayML API key</span>
+                    <input
+                      type="password"
+                      value={runwayApiKey}
+                      onChange={(event) => setRunwayApiKey(event.target.value)}
+                      placeholder={currentSetup?.runwayConfigured ? "Configured" : "Paste key"}
+                    />
+                  </label>
+                  <label>
+                    <span>Server secret</span>
+                    <input
+                      type="password"
+                      value={serverSecret}
+                      onChange={(event) => setServerSecret(event.target.value)}
+                      placeholder={currentSetup?.serverSecretConfigured ? "Configured" : "24+ chars, mixed character types"}
+                    />
+                  </label>
+                </div>
+              ) : null}
+            </div>
+          </>
+        ) : (
+          <>
+            <label>
+              <span>Admin display name</span>
+              <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+            </label>
+            <label className="requiredField">
+              <span>Admin email <small>Required</small></span>
+              <input value={email} onChange={(event) => setEmail(event.target.value)} />
+            </label>
+            <label className="requiredField">
+              <span>Admin password <small>Required</small></span>
+              <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
+            </label>
+          </>
+        )}
+
+        {error ? <div className="errorBox">{error}</div> : null}
+
+        {step === "keys" ? (
+          <button className="primaryButton" onClick={saveKeys} disabled={saving || (!samsarApiKey && !runwayApiKey && !serverSecret)}>
+            {saving ? <Loader2 className="spin" size={17} /> : <Check size={17} />}
+            Save keys and continue
+          </button>
+        ) : (
+          <button className="primaryButton" onClick={createAdmin} disabled={saving || !email || !password}>
+            {saving ? <Loader2 className="spin" size={17} /> : <ArrowRight size={17} />}
+            Create admin login
+          </button>
+        )}
       </div>
     </section>
   );
@@ -917,7 +1099,7 @@ function AuthGate({
         <div className="authPanelHeader">
           <div>
             <p className="eyebrow">Account</p>
-            <h1>{mode === "register" ? "Create workspace" : "Sign in"}</h1>
+            <h1>{mode === "register" ? "Create external account" : "Sign in"}</h1>
           </div>
           {onCancel ? (
             <button className="iconButton" type="button" onClick={onCancel} aria-label="Close account dialog">
@@ -1441,6 +1623,7 @@ function StagedPreviewPanel({
 
 export default function FlashReelsApp() {
   const [setup, setSetup] = useState<SetupStatus | null>(null);
+  const [onboarding, setOnboarding] = useState<OnboardingStatus | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [booting, setBooting] = useState(true);
   const [lastSubmission, setLastSubmission] = useState<Record<string, unknown> | null>(null);
@@ -1630,10 +1813,17 @@ export default function FlashReelsApp() {
         const authData = await readApi<{ user: User | null }>("/api/auth/me");
         setUser(authData.user);
         if (authData.user) {
+          setOnboarding({ needed: false });
           await loadSetup();
         } else {
-          const feedData = await readApi<{ videos: PublishedFeedItem[] }>("/api/feed");
-          setPublishedItems(feedData.videos);
+          const onboardingData = await readApi<OnboardingStatus>("/api/onboarding");
+          setOnboarding(onboardingData);
+          if (onboardingData.needed) {
+            setSetup(onboardingData.setup || null);
+          } else {
+            const feedData = await readApi<{ videos: PublishedFeedItem[] }>("/api/feed");
+            setPublishedItems(feedData.videos);
+          }
         }
       } catch (bootError) {
         setError(bootError instanceof Error ? bootError.message : "Unable to load FlashReels.");
@@ -2030,6 +2220,13 @@ export default function FlashReelsApp() {
     await readApi("/api/auth/logout", { method: "POST" });
     setUser(null);
     setSetup(null);
+    const onboardingData = await readApi<OnboardingStatus>("/api/onboarding");
+    setOnboarding(onboardingData);
+    if (onboardingData.needed) {
+      setPublishedItems([]);
+      setSetup(onboardingData.setup || null);
+      return;
+    }
     setLibrary([]);
     const feedData = await readApi<{ videos: PublishedFeedItem[] }>("/api/feed");
     setPublishedItems(feedData.videos);
@@ -2037,6 +2234,7 @@ export default function FlashReelsApp() {
 
   async function handleAuth(nextUser: User) {
     setUser(nextUser);
+    setOnboarding({ needed: false });
     setAuthDialogOpen(false);
     setError("");
     try {
@@ -2054,8 +2252,33 @@ export default function FlashReelsApp() {
     );
   }
 
-  if (user && !setup?.ready) {
+  if (!user && onboarding?.needed) {
+    return <FirstRunOnboarding setup={setup || onboarding.setup || null} onComplete={handleAuth} />;
+  }
+
+  if (user && !setup?.ready && (user.isAdmin || user.role === "admin")) {
     return <SetupWizard setup={setup} onUpdated={setSetup} />;
+  }
+
+  if (user && !setup?.ready) {
+    return (
+      <section className="setupSurface">
+        <div className="setupPanel authPanel">
+          <div className="panelHeader">
+            <div>
+              <p className="eyebrow">Setup pending</p>
+              <h1>Admin setup required</h1>
+              <p className="setupLead">The internal workspace owner needs to finish the Samsar.one API key setup before external users can render or recharge.</p>
+            </div>
+            <KeyRound size={24} />
+          </div>
+          <button className="secondaryButton" onClick={logout} type="button">
+            <LogOut size={17} />
+            Log out
+          </button>
+        </div>
+      </section>
+    );
   }
 
   return (
@@ -2084,6 +2307,10 @@ export default function FlashReelsApp() {
           </div>
           {user ? (
             <>
+              <a className="feedNavPill" href="/app/billing">
+                <CreditCard size={16} />
+                Billing
+              </a>
               <div className="accountChip">
                 <strong>{user.displayName}</strong>
                 <span>{user.email}</span>
