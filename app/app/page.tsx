@@ -259,8 +259,86 @@ function getRequestId(data: ApiRecord | null) {
   return firstString(data.request_id, data.requestId, data.session_id, data.sessionID);
 }
 
+function createClientRequestId() {
+  const random = typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `fr_${random}`;
+}
+
+function withClientRequestId(payload: Record<string, unknown>, clientRequestId: string) {
+  const metadata = getRecord(payload.metadata);
+  const flashreels = getRecord(metadata.flashreels);
+  return {
+    ...payload,
+    metadata: {
+      ...metadata,
+      flashreels: {
+        ...flashreels,
+        clientRequestId,
+        submittedAt: new Date().toISOString(),
+        imageCount: Array.isArray(payload.image_urls) ? payload.image_urls.length : 0,
+        expectedRoute: "video/step/image_to_video",
+      },
+    },
+  };
+}
+
+function getSubmittedImageCount(payload: Record<string, unknown> | null) {
+  return Array.isArray(payload?.image_urls) ? payload.image_urls.length : 0;
+}
+
+function assertStatusMatchesImagePayload(status: ApiRecord | null, payload: Record<string, unknown> | null) {
+  const session = getDetailedSession(status);
+  const generationType = firstString(session.generationType, session.generation_type).toUpperCase();
+  if (getSubmittedImageCount(payload) > 0 && generationType === "TEXT_TO_VIDEO") {
+    throw new Error("Samsar returned a text-to-video session for an image-to-video request. Start a new render; this response id does not match the submitted image payload.");
+  }
+}
+
 function getStatusText(status: ApiRecord | null) {
   return firstString(status?.step_status, status?.status, getRecord(status?.step).status) || "IDLE";
+}
+
+function getStatusErrorMessage(status: ApiRecord | null) {
+  if (!status) {
+    return "";
+  }
+  const step = getRecord(status.step);
+  const session = getDetailedSession(status);
+  const nestedError = getRecord(status.error);
+  return firstString(
+    status.message,
+    status.error,
+    status.detail,
+    status.error_message,
+    status.errorMessage,
+    status.failure_reason,
+    status.failureReason,
+    status.status_message,
+    status.statusMessage,
+    nestedError.message,
+    nestedError.detail,
+    step.message,
+    step.error,
+    step.error_message,
+    step.failure_reason,
+    session.message,
+    session.error,
+    session.error_message,
+    session.failure_reason,
+  );
+}
+
+function isFailedStatus(status: ApiRecord | null) {
+  const value = getStatusText(status).toUpperCase();
+  return ["FAILED", "FAILURE", "ERROR", "CANCELED", "CANCELLED"].includes(value);
+}
+
+function assertRenderableStatus(status: ApiRecord | null, fallbackMessage: string) {
+  if (isFailedStatus(status)) {
+    throw new Error(getStatusErrorMessage(status) || fallbackMessage);
+  }
 }
 
 function getEffectiveStatusText(status: ApiRecord | null) {
@@ -1788,6 +1866,7 @@ export default function FlashReelsApp() {
   const [authDialogMode, setAuthDialogMode] = useState<"login" | "register">("register");
   const [samsarKeyDialogOpen, setSamsarKeyDialogOpen] = useState(false);
   const [samsarKeyIssue, setSamsarKeyIssue] = useState("");
+  const activeRequestIdRef = useRef("");
   const latestPublishedItem = publishedItems[0] || null;
   const publishedStatus = useMemo(() => buildPublishedStatus(latestPublishedItem), [latestPublishedItem]);
   const displayStatus = user ? status : publishedStatus;
@@ -1810,7 +1889,8 @@ export default function FlashReelsApp() {
     requiresUserAction,
   );
   const nextStep = firstString(step.next_step, displayStatus?.next_step);
-  const currentStep = firstString(step.current_step, displayStatus?.current_step);
+  const displaySession = getDetailedSession(displayStatus);
+  const currentStep = firstString(step.current_step, displayStatus?.current_step, displaySession.currentStage);
   const currentStepLabel = currentStep ? formatStageLabel(currentStep) : "";
   const nextStepLabel = nextStep ? formatStageLabel(nextStep) : "";
   const hasProcessNextAction = Boolean(nextStep) && (waitingForNext || canProcessNext || requiresUserAction);
@@ -1918,13 +1998,23 @@ export default function FlashReelsApp() {
     if (!requestId) {
       return;
     }
+    const polledRequestId = requestId;
     setPolling(true);
     try {
       const data = await readApi<ApiRecord>(
-        buildDetailedStatusUrl(requestId),
+        buildDetailedStatusUrl(polledRequestId),
       );
+      if (activeRequestIdRef.current !== polledRequestId) {
+        return;
+      }
+      const responseRequestId = getRequestId(data);
+      if (responseRequestId && responseRequestId !== polledRequestId) {
+        throw new Error(`Samsar returned status for ${responseRequestId}, but FlashReels is tracking ${polledRequestId}.`);
+      }
+      assertStatusMatchesImagePayload(data, lastSubmission);
+      assertRenderableStatus(data, "Samsar render failed while polling status.");
       setStatus(data);
-      await saveSessionSnapshot(data, requestId, lastSubmission, { refreshLibrary: false });
+      await saveSessionSnapshot(data, polledRequestId, lastSubmission, { refreshLibrary: false });
       setError("");
     } catch (pollError) {
       setError(pollError instanceof Error ? pollError.message : "Unable to poll status.");
@@ -1989,6 +2079,10 @@ export default function FlashReelsApp() {
   }, [canContinue, pollStatus, renderFinished, requestId, terminal]);
 
   useEffect(() => {
+    activeRequestIdRef.current = requestId;
+  }, [requestId]);
+
+  useEffect(() => {
     if (previewResources.length === 0) {
       setSelectedResourceId("");
       setTimelineSeek(0);
@@ -2007,30 +2101,49 @@ export default function FlashReelsApp() {
   }, [finalPreviewResource, previewResources, selectedResourceId, statusText]);
 
   async function startRender(payload: Record<string, unknown>) {
+    const clientRequestId = createClientRequestId();
+    const submissionPayload = withClientRequestId(payload, clientRequestId);
     setBusy(true);
     setError("");
-    setLastSubmission(payload);
-    setDraftPayload(payload);
+    setLastSubmission(submissionPayload);
+    setDraftPayload(submissionPayload);
     setStatus(null);
     setRequestId("");
+    activeRequestIdRef.current = "";
     setSavedUrl("");
     setSelectedResourceId("");
     setTimelineSeek(0);
     try {
       const data = await readApi<ApiRecord>("/api/samsar/step/start", {
         method: "POST",
-        body: JSON.stringify(payload),
+        body: JSON.stringify(submissionPayload),
         timeoutMs: 70000,
       });
       const nextRequestId = getRequestId(data);
       if (!nextRequestId) {
-        throw new Error("Samsar did not return a request id.");
+        throw new Error(getStatusErrorMessage(data) || "Samsar did not return a request id.");
       }
+      const returnedClientRequestId = firstString(data.flashreelsClientRequestId, data.flashreels_client_request_id);
+      if (returnedClientRequestId && returnedClientRequestId !== clientRequestId) {
+        throw new Error(`FlashReels received a response for ${returnedClientRequestId}, but the active submit is ${clientRequestId}.`);
+      }
+      activeRequestIdRef.current = nextRequestId;
+      assertStatusMatchesImagePayload(data, submissionPayload);
+      assertRenderableStatus(data, "Samsar render request failed.");
       setStatus(data);
       setRequestId(nextRequestId);
       const detailedData = await readApi<ApiRecord>(buildDetailedStatusUrl(nextRequestId));
+      if (activeRequestIdRef.current !== nextRequestId) {
+        return;
+      }
+      const detailedRequestId = getRequestId(detailedData);
+      if (detailedRequestId && detailedRequestId !== nextRequestId) {
+        throw new Error(`Samsar returned status for ${detailedRequestId}, but FlashReels just started ${nextRequestId}.`);
+      }
+      assertStatusMatchesImagePayload(detailedData, submissionPayload);
+      assertRenderableStatus(detailedData, "Samsar render failed after the request was created.");
       setStatus(detailedData);
-      await saveSessionSnapshot(detailedData, nextRequestId, payload, { refreshLibrary: true });
+      await saveSessionSnapshot(detailedData, nextRequestId, submissionPayload, { refreshLibrary: true });
     } catch (startError) {
       const message = startError instanceof Error ? startError.message : "Unable to start render.";
       setError(message);
@@ -2057,7 +2170,9 @@ export default function FlashReelsApp() {
         body: JSON.stringify({ request_id: requestId }),
         timeoutMs: 35000,
       });
+      assertRenderableStatus(data, "Samsar failed while approving the next stage.");
       nextRequestId = getRequestId(data) || requestId;
+      activeRequestIdRef.current = nextRequestId;
       setRequestId(nextRequestId);
       setStatus(data);
     } catch (nextError) {
@@ -2072,6 +2187,7 @@ export default function FlashReelsApp() {
     setPolling(true);
     try {
       const detailedData = await readApi<ApiRecord>(buildDetailedStatusUrl(nextRequestId), { timeoutMs: 35000 });
+      assertRenderableStatus(detailedData, "Samsar render failed after approving the next stage.");
       setStatus(detailedData);
       await saveSessionSnapshot(detailedData, nextRequestId, lastSubmission, { refreshLibrary: false });
     } catch (statusError) {
@@ -2109,6 +2225,7 @@ export default function FlashReelsApp() {
     setBusy(true);
     setError("");
     setRequestId(previousRequestId);
+    activeRequestIdRef.current = previousRequestId;
     setLastSubmission(Object.keys(previousPayload).length > 0 ? previousPayload : null);
     setDraftPayload(Object.keys(previousPayload).length > 0 ? previousPayload : null);
     setStatus(Object.keys(previousStatus).length > 0 ? previousStatus : {
@@ -2122,6 +2239,9 @@ export default function FlashReelsApp() {
 
     try {
       const detailedData = await readApi<ApiRecord>(buildDetailedStatusUrl(previousRequestId));
+      if (activeRequestIdRef.current !== previousRequestId) {
+        return;
+      }
       setStatus(detailedData);
       await saveSessionSnapshot(detailedData, previousRequestId, Object.keys(previousPayload).length > 0 ? previousPayload : null, { refreshLibrary: true });
     } catch (loadError) {
@@ -2165,6 +2285,7 @@ export default function FlashReelsApp() {
         language,
       };
       setRequestId(nextRequestId);
+      activeRequestIdRef.current = nextRequestId;
       setStatus(data);
       setLastSubmission(payload);
       setDraftPayload(null);
@@ -2189,6 +2310,7 @@ export default function FlashReelsApp() {
     if (!nextRequestId) {
       throw new Error(emptyRequestMessage);
     }
+    activeRequestIdRef.current = nextRequestId;
     setRequestId(nextRequestId);
     setStatus(data);
     setLastSubmission(payload);
@@ -2197,6 +2319,9 @@ export default function FlashReelsApp() {
     setSelectedResourceId("");
     setTimelineSeek(0);
     const detailedData = await readApi<ApiRecord>(buildDetailedStatusUrl(nextRequestId));
+    if (activeRequestIdRef.current !== nextRequestId) {
+      return;
+    }
     setStatus(detailedData);
     await saveSessionSnapshot(detailedData, nextRequestId, payload, { refreshLibrary: true });
   }
@@ -2304,6 +2429,7 @@ export default function FlashReelsApp() {
         sourceVideoIds: videosToJoin.map((video) => video.id),
         prompt: `Joined reel: ${videosToJoin.map((video) => video.title).join(" + ")}`,
       };
+      activeRequestIdRef.current = nextRequestId;
       setRequestId(nextRequestId);
       setStatus(data);
       setLastSubmission(payload);

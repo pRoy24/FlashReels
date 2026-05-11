@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { requireSessionUser } from "@/lib/auth";
-import { jsonError } from "@/lib/http";
+import { apiError, jsonError } from "@/lib/http";
 import { getSamsarStepStatus } from "@/lib/samsar";
 
 export async function GET(request: Request) {
@@ -9,6 +9,9 @@ export async function GET(request: Request) {
     await requireSessionUser(request);
     const url = new URL(request.url);
     const requestId = url.searchParams.get("request_id") || url.searchParams.get("session_id") || "";
+    if (!requestId) {
+      throw apiError("request_id is required.");
+    }
     const response = await getSamsarStepStatus(request, requestId);
     return NextResponse.json(response);
   } catch (error) {
