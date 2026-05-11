@@ -254,40 +254,19 @@ button:disabled {
   min-height: 0;
   padding: 0;
   overflow: hidden;
-  border: 1px solid var(--line-strong);
-  border-radius: 8px;
-  background: #0c1014;
-  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.36), 0 0 0 1px rgba(103, 217, 157, 0.06);
-}
-
-.heroVisual::after {
-  position: absolute;
-  inset: 0;
-  border: 1px solid rgba(109, 181, 255, 0.2);
-  content: "";
-  pointer-events: none;
-  transform: translate(10px, 10px);
-}
-
-.visualFrame {
-  position: relative;
-  display: grid;
-  place-items: center;
-  aspect-ratio: auto;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
   border: 0;
-  border-radius: inherit;
-  background: #11171d;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .heroAnimationVideo {
+  display: block;
   width: 100%;
   height: 100%;
-  object-fit: contain;
+  object-fit: cover;
   object-position: center;
-  background: #06090c;
+  background: transparent;
 }
 
 .landingBand {
@@ -2877,10 +2856,6 @@ button.feedNavPill {
     max-width: 760px;
     margin: 10px auto 0;
     aspect-ratio: 16 / 9;
-  }
-
-  .visualFrame {
-    width: 100%;
   }
 
   .inputStageGrid,

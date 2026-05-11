@@ -1550,26 +1550,36 @@ export default function FlashReelsApp() {
     const title = firstString(snapshotPayload?.prompt, getDetailedSession(snapshotStatus).title, snapshotRequestId, "Untitled render");
     const snapshotStatusText = getEffectiveStatusText(snapshotStatus);
     const persistedStatus = snapshotStatusText === "IDLE" && snapshotRequestId ? "PENDING" : snapshotStatusText;
-    const video = await readApi<{ video: LibraryVideo }>("/api/library", {
-      method: "POST",
-      body: JSON.stringify({
-        title: title.slice(0, 72),
-        mode: "image_list_to_video",
-        prompt: title,
-        sourceUrl,
-        samsarRequestId: snapshotRequestId,
-        samsarSessionId: getRequestId(snapshotStatus) || snapshotRequestId,
-        status: persistedStatus,
-        metadata: {
-          payload: snapshotPayload || {},
-          stepStatus: snapshotStatus,
-        },
-      }),
-    });
-
     if (sourceUrl) {
       setSavedUrl(sourceUrl);
     }
+
+    let video: { video: LibraryVideo };
+    try {
+      video = await readApi<{ video: LibraryVideo }>("/api/library", {
+        method: "POST",
+        body: JSON.stringify({
+          title: title.slice(0, 72),
+          mode: "image_list_to_video",
+          prompt: title,
+          sourceUrl,
+          samsarRequestId: snapshotRequestId,
+          samsarSessionId: getRequestId(snapshotStatus) || snapshotRequestId,
+          status: persistedStatus,
+          metadata: {
+            payload: snapshotPayload || {},
+            stepStatus: snapshotStatus,
+          },
+        }),
+      });
+    } catch (saveError) {
+      const message = saveError instanceof Error ? saveError.message : "";
+      if (message.includes("Persistent storage is not configured")) {
+        return null;
+      }
+      throw saveError;
+    }
+
     if (options.refreshLibrary !== false) {
       await loadLibrary();
     } else {

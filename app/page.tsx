@@ -84,16 +84,14 @@ export default async function LandingPage() {
           </div>
 
           <div className="heroVisual" aria-hidden="true">
-            <div className="visualFrame">
-              <video
-                className="heroAnimationVideo"
-                src="/assets/flashreels-louisiana-hero-animation.mp4"
-                autoPlay
-                muted
-                loop
-                playsInline
-              />
-            </div>
+            <video
+              className="heroAnimationVideo"
+              src="/assets/flashreels-louisiana-hero-animation.mp4"
+              autoPlay
+              muted
+              loop
+              playsInline
+            />
           </div>
         </div>
         <a className="landingScrollCue" href="#workflow" aria-label="Scroll to workflow section">

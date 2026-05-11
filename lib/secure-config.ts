@@ -9,6 +9,8 @@ const STORE_KEY = "flashreels:secrets:v1";
 const STORE_FILE = "secrets.json";
 const ENCRYPTION_SEED_KEY = "flashreels:encryption-seed:v1";
 const ENCRYPTION_SEED_FILE = "encryption-seed.json";
+export const RUNTIME_KEYS_COOKIE_NAME = "flashreels_runtime_keys";
+export const RUNTIME_KEYS_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
 
 type SecretName = "samsarApiKey" | "runwayApiKey" | "serverSecret";
 
@@ -28,6 +30,22 @@ interface EncryptionSeedStore {
   version: 1;
   seed: string;
   createdAt: string;
+}
+
+interface RuntimeKeys {
+  samsarApiKey: string;
+  runwayApiKey: string;
+  serverSecret: string;
+  sources: Record<SecretName, string>;
+}
+
+interface SaveRuntimeKeysResult {
+  status: ReturnType<typeof buildSetupStatus>;
+  cookie?: {
+    name: string;
+    value: string;
+    maxAge: number;
+  };
 }
 
 const EMPTY_STORE: SecretStore = {
@@ -65,6 +83,13 @@ async function getEncryptionKey() {
   return crypto.createHash("sha256").update(seed).digest();
 }
 
+function getRuntimeCookieEncryptionKey() {
+  const seed = process.env.FLASHREELS_AUTH_SECRET ||
+    process.env.FLASHREELS_SECRET ||
+    "flashreels-local-dev-auth-secret";
+  return crypto.createHash("sha256").update(`runtime-cookie:${seed}`).digest();
+}
+
 function encrypt(value: string, key: Buffer): EncryptedSecret {
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
@@ -97,6 +122,20 @@ function decrypt(secret: EncryptedSecret | undefined, key: Buffer | null) {
   } catch {
     return "";
   }
+}
+
+function parseCookies(header: string | null) {
+  const result = new Map<string, string>();
+  if (!header) {
+    return result;
+  }
+  for (const part of header.split(";")) {
+    const [name, ...rest] = part.trim().split("=");
+    if (name) {
+      result.set(name, decodeURIComponent(rest.join("=")));
+    }
+  }
+  return result;
 }
 
 function normalizeStoredKeys(parsed: Partial<SecretStore> & { keys?: Record<string, unknown> }) {
@@ -132,6 +171,65 @@ function envValue(names: string[]) {
   return { value: "", source: "" };
 }
 
+function emptyRuntimeKeys(): RuntimeKeys {
+  return {
+    samsarApiKey: "",
+    runwayApiKey: "",
+    serverSecret: "",
+    sources: {
+      samsarApiKey: "",
+      runwayApiKey: "",
+      serverSecret: "",
+    },
+  };
+}
+
+function readRuntimeKeysCookie(request?: Request): RuntimeKeys {
+  if (!request) {
+    return emptyRuntimeKeys();
+  }
+
+  const cookie = parseCookies(request.headers.get("cookie")).get(RUNTIME_KEYS_COOKIE_NAME);
+  if (!cookie) {
+    return emptyRuntimeKeys();
+  }
+
+  try {
+    const parsed = JSON.parse(Buffer.from(cookie, "base64url").toString("utf8")) as Partial<SecretStore>;
+    const keys = normalizeStoredKeys(parsed);
+    const encryptionKey = getRuntimeCookieEncryptionKey();
+    const samsarApiKey = decrypt(keys.samsarApiKey, encryptionKey);
+    const runwayApiKey = decrypt(keys.runwayApiKey, encryptionKey);
+    const serverSecret = decrypt(keys.serverSecret, encryptionKey);
+    return {
+      samsarApiKey,
+      runwayApiKey,
+      serverSecret,
+      sources: {
+        samsarApiKey: samsarApiKey ? "browser_session" : "",
+        runwayApiKey: runwayApiKey ? "browser_session" : "",
+        serverSecret: serverSecret ? "browser_session" : "",
+      },
+    };
+  } catch {
+    return emptyRuntimeKeys();
+  }
+}
+
+function serializeRuntimeKeysCookie(keys: Pick<RuntimeKeys, SecretName>) {
+  const encryptionKey = getRuntimeCookieEncryptionKey();
+  const store: SecretStore = {
+    version: 1,
+    updatedAt: new Date().toISOString(),
+    keys: {
+      ...(keys.samsarApiKey ? { samsarApiKey: encrypt(keys.samsarApiKey, encryptionKey) } : {}),
+      ...(keys.runwayApiKey ? { runwayApiKey: encrypt(keys.runwayApiKey, encryptionKey) } : {}),
+      ...(keys.serverSecret ? { serverSecret: encrypt(keys.serverSecret, encryptionKey) } : {}),
+    },
+  };
+  return Buffer.from(JSON.stringify(store), "utf8").toString("base64url");
+}
+
 function envNames(secret: SecretName) {
   if (secret === "samsarApiKey") {
     return ["FLASHREELS_SAMSAR_API_KEY", "SAMSAR_API_KEY"];
@@ -164,65 +262,12 @@ function validateServerSecret(secret: string) {
   }
 }
 
-export async function saveRuntimeKeys(payload: Record<string, unknown>) {
-  const samsarApiKey = normalizeString(payload.samsarApiKey);
-  const runwayApiKey = normalizeString(payload.runwayApiKey);
-  const serverSecret = normalizeString(payload.serverSecret);
-
-  if (!samsarApiKey && !runwayApiKey && !serverSecret) {
-    throw apiError("Provide at least one key or server secret to save.");
-  }
-  if (serverSecret) {
-    validateServerSecret(serverSecret);
-  }
-
-  const encryptionKey = await getEncryptionKey();
-  const store = await readStore();
-  store.keys = {
-    ...store.keys,
-    ...(samsarApiKey ? { samsarApiKey: encrypt(samsarApiKey, encryptionKey) } : {}),
-    ...(runwayApiKey ? { runwayApiKey: encrypt(runwayApiKey, encryptionKey) } : {}),
-    ...(serverSecret ? { serverSecret: encrypt(serverSecret, encryptionKey) } : {}),
-  };
-  store.updatedAt = new Date().toISOString();
-  await writeStore(store);
-  await persistLocalEnvFile({ samsarApiKey, runwayApiKey, serverSecret });
-  return getSetupStatus();
+function shouldUseRuntimeKeysCookie() {
+  const persistence = getPersistenceStatus();
+  return process.env.VERCEL === "1" && !persistence.persistent;
 }
 
-export async function getRuntimeKeys() {
-  const store = await readStore();
-  const samsarEnv = envValue(envNames("samsarApiKey"));
-  const runwayEnv = envValue(envNames("runwayApiKey"));
-  const serverSecretEnv = envValue(envNames("serverSecret"));
-  const hasStoredSecrets = Boolean(store.keys.samsarApiKey || store.keys.runwayApiKey || store.keys.serverSecret);
-  const encryptionKey = hasStoredSecrets ? await getEncryptionKey() : null;
-  const samsarApiKey = samsarEnv.value || decrypt(store.keys.samsarApiKey, encryptionKey);
-  const runwayApiKey = runwayEnv.value || decrypt(store.keys.runwayApiKey, encryptionKey);
-  const serverSecret = serverSecretEnv.value || decrypt(store.keys.serverSecret, encryptionKey);
-
-  return {
-    samsarApiKey,
-    runwayApiKey,
-    serverSecret,
-    sources: {
-      samsarApiKey: samsarEnv.value ? samsarEnv.source : samsarApiKey ? "encrypted_store" : "",
-      runwayApiKey: runwayEnv.value ? runwayEnv.source : runwayApiKey ? "encrypted_store" : "",
-      serverSecret: serverSecretEnv.value ? serverSecretEnv.source : serverSecret ? "encrypted_store" : "",
-    },
-  };
-}
-
-export async function requireRuntimeKeys() {
-  const keys = await getRuntimeKeys();
-  if (!keys.samsarApiKey) {
-    throw apiError("Samsar API key is not configured.", 412);
-  }
-  return keys;
-}
-
-export async function getSetupStatus() {
-  const keys = await getRuntimeKeys();
+function buildSetupStatus(keys: RuntimeKeys) {
   return {
     samsarConfigured: Boolean(keys.samsarApiKey),
     runwayConfigured: Boolean(keys.runwayApiKey),
@@ -240,6 +285,90 @@ export async function getSetupStatus() {
     publicBaseUrl: getConfiguredPublicBaseUrl(),
     ready: Boolean(keys.samsarApiKey),
   };
+}
+
+export async function saveRuntimeKeys(payload: Record<string, unknown>, request?: Request): Promise<SaveRuntimeKeysResult> {
+  const samsarApiKey = normalizeString(payload.samsarApiKey);
+  const runwayApiKey = normalizeString(payload.runwayApiKey);
+  const serverSecret = normalizeString(payload.serverSecret);
+
+  if (!samsarApiKey && !runwayApiKey && !serverSecret) {
+    throw apiError("Provide at least one key or server secret to save.");
+  }
+  if (serverSecret) {
+    validateServerSecret(serverSecret);
+  }
+
+  if (shouldUseRuntimeKeysCookie()) {
+    const existing = readRuntimeKeysCookie(request);
+    const nextKeys: RuntimeKeys = {
+      samsarApiKey: samsarApiKey || existing.samsarApiKey,
+      runwayApiKey: runwayApiKey || existing.runwayApiKey,
+      serverSecret: serverSecret || existing.serverSecret,
+      sources: {
+        samsarApiKey: samsarApiKey || existing.samsarApiKey ? "browser_session" : "",
+        runwayApiKey: runwayApiKey || existing.runwayApiKey ? "browser_session" : "",
+        serverSecret: serverSecret || existing.serverSecret ? "browser_session" : "",
+      },
+    };
+    return {
+      status: buildSetupStatus(nextKeys),
+      cookie: {
+        name: RUNTIME_KEYS_COOKIE_NAME,
+        value: serializeRuntimeKeysCookie(nextKeys),
+        maxAge: RUNTIME_KEYS_COOKIE_MAX_AGE,
+      },
+    };
+  }
+
+  const encryptionKey = await getEncryptionKey();
+  const store = await readStore();
+  store.keys = {
+    ...store.keys,
+    ...(samsarApiKey ? { samsarApiKey: encrypt(samsarApiKey, encryptionKey) } : {}),
+    ...(runwayApiKey ? { runwayApiKey: encrypt(runwayApiKey, encryptionKey) } : {}),
+    ...(serverSecret ? { serverSecret: encrypt(serverSecret, encryptionKey) } : {}),
+  };
+  store.updatedAt = new Date().toISOString();
+  await writeStore(store);
+  await persistLocalEnvFile({ samsarApiKey, runwayApiKey, serverSecret });
+  return { status: await getSetupStatus(request) };
+}
+
+export async function getRuntimeKeys(request?: Request): Promise<RuntimeKeys> {
+  const store = await readStore();
+  const samsarEnv = envValue(envNames("samsarApiKey"));
+  const runwayEnv = envValue(envNames("runwayApiKey"));
+  const serverSecretEnv = envValue(envNames("serverSecret"));
+  const hasStoredSecrets = Boolean(store.keys.samsarApiKey || store.keys.runwayApiKey || store.keys.serverSecret);
+  const encryptionKey = hasStoredSecrets ? await getEncryptionKey() : null;
+  const samsarApiKey = samsarEnv.value || decrypt(store.keys.samsarApiKey, encryptionKey);
+  const runwayApiKey = runwayEnv.value || decrypt(store.keys.runwayApiKey, encryptionKey);
+  const serverSecret = serverSecretEnv.value || decrypt(store.keys.serverSecret, encryptionKey);
+  const cookieKeys = readRuntimeKeysCookie(request);
+
+  return {
+    samsarApiKey: samsarApiKey || cookieKeys.samsarApiKey,
+    runwayApiKey: runwayApiKey || cookieKeys.runwayApiKey,
+    serverSecret: serverSecret || cookieKeys.serverSecret,
+    sources: {
+      samsarApiKey: samsarEnv.value ? samsarEnv.source : samsarApiKey ? "encrypted_store" : cookieKeys.sources.samsarApiKey,
+      runwayApiKey: runwayEnv.value ? runwayEnv.source : runwayApiKey ? "encrypted_store" : cookieKeys.sources.runwayApiKey,
+      serverSecret: serverSecretEnv.value ? serverSecretEnv.source : serverSecret ? "encrypted_store" : cookieKeys.sources.serverSecret,
+    },
+  };
+}
+
+export async function requireRuntimeKeys(request?: Request) {
+  const keys = await getRuntimeKeys(request);
+  if (!keys.samsarApiKey) {
+    throw apiError("Samsar API key is not configured.", 412);
+  }
+  return keys;
+}
+
+export async function getSetupStatus(request?: Request) {
+  return buildSetupStatus(await getRuntimeKeys(request));
 }
 
 export function getConfiguredPublicBaseUrl() {
